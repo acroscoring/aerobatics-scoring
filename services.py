@@ -1,4 +1,5 @@
 import streamlit as st
+import requests
 import gspread
 from typing import Optional, Dict, Any
 from gspread.spreadsheet import Spreadsheet
@@ -16,8 +17,7 @@ class SheetService:
         """Lazily authenticates and returns the gspread client."""
         if self._client is None:
             try:
-                # Type-safe casting of the secrets dict
-                creds_dict = dict(self._secrets["gcp_service_account"])
+                creds_dict = self._secrets["gcp_service_account"]
                 self._client = gspread.service_account_from_dict(creds_dict)
             except KeyError as e:
                 st.error(f"Missing Secret Configuration: {e}")
@@ -33,33 +33,43 @@ class SheetService:
         admin_email: str
     ) -> Optional[str]:
         """
-        Clones the template, renames it, shares with Admin, and returns the new ID.
+        Calls the Apps Script API to create the sheet and share it with the Bot.
         """
-        client = self._get_client()
-        
         try:
-            # 1. Clone the template
-            new_sheet: Spreadsheet = client.copy(
-                file_id=self._secrets["google_sheets"]["template_id"], 
-                title=f"🏆 {comp_name} - Scoring DB",
-                copy_permissions=True,
-                folder_id=self._secrets["google_sheets"]["comp_folder"]
-            )
+            # 1. Get Config
+            #api_url: str = self._secrets["google_app_script"]["url"]
+            api_url: str = self._secrets["google_app_script"]["dev_url"]
+            api_secret: str = self._secrets["google_app_script"]["api_secret"]
+            bot_email: str = self._secrets["gcp_service_account"]["client_email"]
+
+            # 2. Prepare Payload
+            payload = {
+                "comp_name": comp_name,
+                "admin_email": admin_email,
+                "bot_email": bot_email,
+                "api_secret": api_secret
+            }
+
+            # 3. Call the API
+            # requests.post handles the JSON serialization automatically
+            response = requests.post(api_url, json=payload)
             
-            # 2. Share with Admin (Editor Access)
-            new_sheet.share(
-                email_address=admin_email, 
-                perm_type='user', 
-                role='writer',
-                notify=True,
-                email_message=f"Link to the '{comp_name}' scoring sheet. Use this sheet to manage the competion and import/export data from AcroScoring."
-            )
-            
-            # 3. Return the new unique ID
-            return new_sheet.id
-            
+            # 4. Handle Response
+            if response.status_code == 200:
+                result = response.json()
+                
+                if result.get("status") == "Success":
+                    sheet_id = result.get("sheet_id")
+                    return sheet_id
+                else:
+                    st.error(f"App Script Error: {result.get('message')}")
+                    return None
+            else:
+                st.error(f"HTTP Error: {response.status_code} - {response.text}")
+                return None
+
         except Exception as e:
-            st.error(f"Failed to create competition: {e}")
+            st.error(f"Failed to connect to Factory API: {e}")
             return None
 
     def get_sheet_by_id(self, sheet_id: str) -> Optional[Spreadsheet]:
