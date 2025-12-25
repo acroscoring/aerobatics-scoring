@@ -1,5 +1,5 @@
 import streamlit as st
-from util.services import get_service
+from util.google_services import get_service
 
 # Page Configuration (Must be the first Streamlit command)
 st.set_page_config(page_title="Competition", page_icon="🏆", layout="wide")
@@ -14,7 +14,7 @@ if not comp_id:
     st.error("❌ Invalid Competition Link")
     st.stop()
 
-# Get Sheet
+# Get Services
 service = get_service()
 sheet = service.get_sheet_by_id(comp_id)
 
@@ -26,5 +26,4 @@ if not sheet:
 # Valid Sheet Found - Show Title
 st.header(sheet.title)
 
-# ... (Judge Logic goes here later) ...
-st.info("📸 Judge Camera Input would appear here.")
+service.get_scoring_sheet_data()

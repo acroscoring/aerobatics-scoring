@@ -1,5 +1,5 @@
 import streamlit as st
-from util.services import get_service
+from util.google_services import get_service
 
 # Page Configuration (Must be the first Streamlit command)
 st.set_page_config(page_title="Admin", page_icon="⚙️", layout="wide")
