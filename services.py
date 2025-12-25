@@ -33,12 +33,13 @@ class SheetService:
         admin_email: str
     ) -> Optional[str]:
         """
-        Calls the Apps Script API to create the sheet and share it with the Bot.
+        Calls the Apps Script API to create the comp sheet
         """
+
         try:
             # 1. Get Config
-            #api_url: str = self._secrets["google_app_script"]["url"]
-            api_url: str = self._secrets["google_app_script"]["dev_url"]
+            api_url: str = self._secrets["google_app_script"]["url"]
+            #st.info(api_url)
             api_secret: str = self._secrets["google_app_script"]["api_secret"]
             bot_email: str = self._secrets["gcp_service_account"]["client_email"]
 

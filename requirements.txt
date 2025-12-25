@@ -1,6 +1,7 @@
 streamlit
 gspread
 google-auth
-pandas
 google-api-python-client
+google-api-python-client-stubs
+pandas
 requests
