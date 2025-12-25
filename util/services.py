@@ -31,7 +31,7 @@ class SheetService:
         self, 
         comp_name: str, 
         admin_email: str
-    ) -> Optional[str]:
+    ) -> Optional[tuple[str, str]]:
         """
         Calls the Apps Script API to create the comp sheet
         """
@@ -60,8 +60,7 @@ class SheetService:
                 result = response.json()
                 
                 if result.get("status") == "Success":
-                    sheet_id = result.get("sheet_id")
-                    return sheet_id
+                    return result.get("sheet_id"), result.get("sheet_url")
                 else:
                     st.error(f"App Script Error: {result.get('message')}")
                     return None

@@ -1,0 +1,29 @@
+import streamlit as st
+from util.services import get_service
+
+# Page Configuration (Must be the first Streamlit command)
+st.set_page_config(page_title="Admin", page_icon="⚙️", layout="wide")
+
+# Main Content
+st.title("⚙️ Administration")
+
+st.write("Create a new competition.")
+
+with st.form("create_comp_form"):
+    comp_name: str = st.text_input("Competition Name", placeholder="e.g. Australian National & Freestyle Championships 2025")
+    admin_email: str = st.text_input("Admin Gmail", placeholder="you@gmail.com")
+    submitted: bool = st.form_submit_button("🚀 Create Competition")
+
+    if submitted:
+        if not comp_name or not admin_email:
+            st.warning("Please fill in both fields.")
+
+        with st.spinner("Creating competition file..."):
+            service = get_service()
+            new_sheet_id, new_sheet_url = service.create_competition_sheet(comp_name=comp_name, admin_email=admin_email) or (None, None)
+
+        if new_sheet_id and new_sheet_url:
+            st.success("Competition created successfully and sent to your email!")
+            st.link_button("Open Google Sheet!", url=new_sheet_url, type="secondary", icon="⚙️")
+        else:
+            st.error("Could not create competition.")

@@ -3,5 +3,7 @@ gspread
 google-auth
 google-api-python-client
 google-api-python-client-stubs
+google-generativeai
+pillow
 pandas
 requests
