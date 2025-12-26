@@ -1,0 +1,8 @@
+[server]
+maxUploadSize = 20
+
+[theme]
+base="light"
+primaryColor = "#1B72E8"
+secondaryBackgroundColor = "#f0f4faff"
+font = "Roboto:https://fonts.googleapis.com/css2?family=Roboto&display=swap"

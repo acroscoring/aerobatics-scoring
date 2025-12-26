@@ -1,5 +1,5 @@
 import streamlit as st
-from util.google_services import get_service
+from util.google_services import get_google_service
 
 # Page Configuration (Must be the first Streamlit command)
 st.set_page_config(page_title="Admin", page_icon="⚙️", layout="wide")
@@ -19,7 +19,7 @@ with st.form("create_comp_form"):
             st.warning("Please fill in both fields.")
 
         with st.spinner("Creating competition file..."):
-            service = get_service()
+            service = get_google_service()
             new_sheet_id, new_sheet_url = service.create_competition_sheet(comp_name=comp_name, admin_email=admin_email) or (None, None)
 
         if new_sheet_id and new_sheet_url:
