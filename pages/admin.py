@@ -9,7 +9,9 @@ st.set_page_config(page_title="Admin", page_icon="⚙️", layout="wide")
 st.title("⚙️ Administration")
 
 st.write("Create a new competition.")
-current_url = st_javascript("window.parent.location.href") # Needs to run 2x, 1st time it's zero then URL
+
+with st.sidebar: # To not consume space in the UI, Streamlit bug
+    current_url = st_javascript("window.parent.location.href") # Needs to run 2x, 1st time it's zero then URL
 
 with st.form("create_comp_form"):
     comp_name: str = st.text_input("Competition Name", placeholder="e.g. Australian National & Freestyle Championships 2025")

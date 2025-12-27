@@ -17,10 +17,10 @@
     }
   },
   "updateContentCommand": "[ -f packages.txt ] && sudo apt update && sudo apt upgrade -y && sudo xargs apt install -y <packages.txt; [ -f requirements.txt ] && pip3 install --user -r requirements.txt; pip3 install --user streamlit; echo '✅ Packages installed and Requirements met'",
+  "postStartCommand": "echo \"$SECRETS_TOML\" > ~/secrets.toml && echo 'Restored Secrets'",
   "postAttachCommand": {
     "server": "streamlit run streamlit_app.py --server.enableCORS false --server.enableXsrfProtection false"
   },
-  "postStartCommand": "echo \"$SECRETS_TOML\" > ~/secrets.toml && echo 'Restored Secrets'",
   "portsAttributes": {
     "8501": {
       "label": "Application",
