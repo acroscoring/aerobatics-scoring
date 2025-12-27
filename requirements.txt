@@ -8,3 +8,4 @@ pydantic
 pillow
 pandas
 requests
+streamlit-javascript

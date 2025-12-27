@@ -26,20 +26,21 @@ class GoogleServices:
     
     def __init__(self):
         self._client = _get_global_gspread_client()
-        self._api_url: str = st.secrets["google_app_script"]["url"]
+        self._api_url: str = st.secrets["google_app_script"]["prod_url"] if st.secrets["env"]["type"] == "prod" else st.secrets["google_app_script"]["dev_url"]
         self._api_secret: str = st.secrets["google_app_script"]["api_secret"]
         self._bot_email: str = st.secrets["gcp_service_account"]["client_email"]
         self._api_key: str = st.secrets["google_gemini"]["api_key"]
 
-    def create_competition_sheet(self, comp_name: str, admin_email: str) -> Optional[tuple[str, str]]:
+    def create_competition_sheet(self, comp_name: str, admin_email: str, current_url: str) -> Optional[tuple[str, str]]:
         try:
             payload = {
                 "comp_name": comp_name,
                 "admin_email": admin_email,
                 "bot_email": self._bot_email,
+                "app_url": current_url,
                 "api_secret": self._api_secret
             }
-
+            
             # requests.post handles the JSON serialization automatically
             response = requests.post(self._api_url, json=payload)
             
@@ -47,7 +48,7 @@ class GoogleServices:
                 result = response.json()
                 
                 if result.get("status") == "Success":
-                    return result.get("sheet_id"), result.get("sheet_url")
+                    return result.get("sheet_id"), result.get("comp_url")
                 else:
                     st.error(f"App Script Error: {result.get('message')}")
                     return None
