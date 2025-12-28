@@ -1,7 +1,8 @@
 {
-  "name": "Python 3",
+  "name": "Python",
+  // https://github.com/devcontainers/images/tree/main/src/python
   // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-  "image": "mcr.microsoft.com/devcontainers/python:1-3-bookworm",
+  "image": "mcr.microsoft.com/devcontainers/python",
   "customizations": {
     "codespaces": {
       "openFiles": [

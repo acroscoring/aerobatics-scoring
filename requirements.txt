@@ -5,7 +5,10 @@ google-api-python-client
 google-api-python-client-stubs
 google-genai
 pydantic
+pydantic[email]
 pillow
 pandas
 requests
 streamlit-javascript
+streamlit-authenticator
+bcrypt

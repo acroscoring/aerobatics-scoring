@@ -1,11 +1,29 @@
 import streamlit as st
 import requests
 import gspread
-from typing import Optional, cast
+from typing import Optional, cast, Literal
 from google import genai
 from PIL import Image
 import util.streamlit_services as st_service
 import util.scoring_services as score_service
+from pydantic import BaseModel, EmailStr, HttpUrl
+
+# --------------------------------------------------------------------------------------------------------------
+
+class CreateCompetition(BaseModel):
+    comp_name: str
+    admin_email: EmailStr
+    bot_email: EmailStr
+    app_url: HttpUrl
+    api_secret: str
+
+class CreateCompetitionResponse(BaseModel):
+    status: Literal["Success", "Error"]
+    message: Optional[str] = None
+    sheet_id: Optional[str] = None
+    comp_url: Optional[HttpUrl] = None
+
+# --------------------------------------------------------------------------------------------------------------
 
 @st.cache_resource
 def _get_global_gspread_client():
@@ -31,26 +49,25 @@ class GoogleServices:
         self._bot_email: str = st.secrets["gcp_service_account"]["client_email"]
         self._api_key: str = st.secrets["google_gemini"]["api_key"]
 
-    def create_competition_sheet(self, comp_name: str, admin_email: str, current_url: str) -> Optional[tuple[str, str]]:
+    def create_competition_sheet(self, comp_name: str, admin_email: str, current_url: HttpUrl) -> Optional[tuple[str, str]]:
         try:
-            payload = {
-                "comp_name": comp_name,
-                "admin_email": admin_email,
-                "bot_email": self._bot_email,
-                "app_url": current_url,
-                "api_secret": self._api_secret
-            }
+            payload = CreateCompetition(
+                comp_name = comp_name,
+                admin_email = admin_email,
+                bot_email = self._bot_email,
+                app_url = current_url,
+                api_secret = self._api_secret
+            )
             
-            # requests.post handles the JSON serialization automatically
-            response = requests.post(self._api_url, json=payload)
+            response = requests.post(self._api_url, json=payload.model_dump(mode='json'))
             
             if response.status_code == 200:
-                result = response.json()
+                result = CreateCompetitionResponse(**response.json())
                 
-                if result.get("status") == "Success":
-                    return result.get("sheet_id"), result.get("comp_url")
+                if result.status == "Success":
+                    return str(result.sheet_id), str(result.comp_url)
                 else:
-                    st.error(f"App Script Error: {result.get('message')}")
+                    st.error(f"App Script Error: {result.message}")
                     return None
             else:
                 st.error(f"HTTP Error: {response.status_code} - {response.text}")
@@ -96,6 +113,8 @@ class GoogleServices:
             return cast(score_service.ScoreSheet, response.parsed)
         except Exception as e:
             st.error(f"Extraction failed: {e}")
+
+# --------------------------------------------------------------------------------------------------------------
 
 # --- Convenience Function (Singleton Pattern) ---
 # This prevents re-initializing the service on every rerun
