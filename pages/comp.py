@@ -1,5 +1,5 @@
 import streamlit as st
-from util.google_services import get_google_service
+from util.google_services import SheetDB, get_scoring_sheet_data_using_ai
 import util.streamlit_services as st_service
 from PIL import Image
 import pandas as pd
@@ -14,22 +14,14 @@ st.title("🏆 Competition Scoring")
     
 # Query Params
 query_params = st.query_params
-comp_id: str = query_params.get("comp_id", "")
+comp_id = query_params.get("comp_id")
 if not comp_id:
-    st.error("❌ Invalid Competition Link")
+    st.error("Invalid Competition Link", icon="❌")
     st.stop()
 
-# Get Services
-google_service = get_google_service()
-sheet = google_service.get_sheet_by_id(comp_id)
+db = SheetDB.connect(comp_id)
 
-if not sheet:
-    st.error("❌ Competition Not Found")
-    st.info("The ID in the link is invalid or you do not have access.")
-    st.stop()
-
-# Valid Sheet Found - Show Title
-st.header(sheet.title)
+st.header(db.get_title())
 
 st.markdown("### 📸 Capture Score Sheet")
 st.divider()
@@ -46,9 +38,9 @@ if not current_score_sheet:
         if not current_score_sheet:
             st.image(image, caption="Image uploaded, looks correct?")
 
-        if st.button("Extract Scores from Image", type="primary", icon="🤖"):
+        if st.button("Extract Scores from Image", type="primary", icon="👀"):
             with st.spinner("AI is analyzing handwriting..."):
-                new_score_sheet = google_service.get_scoring_sheet_data_using_ai(image)
+                new_score_sheet = get_scoring_sheet_data_using_ai(image)
                 if new_score_sheet:
                     current_score_sheet = new_score_sheet
                     st_service.set_session_state("current_score_sheet", current_score_sheet)
@@ -108,10 +100,10 @@ if current_score_sheet:
                     figures=updated_figures
                 )
 
-                google_service.save_to_sheet(final_score_sheet)
+                db.save_to_sheet(final_score_sheet)
                 
             except Exception as e:
-                st.error(f"Validation Error: {e}")
+                st.error(f"Validation Error: {e}", icon="❌")
         
     with col2:
         if st.button("Reset", type="secondary", icon="❌"):

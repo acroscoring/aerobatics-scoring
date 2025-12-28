@@ -1,5 +1,7 @@
 import streamlit as st
-from util.google_services import get_google_service
+from util.google_services import create_competition_sheet
+from util.scoring_services import try_create_user
+from util.google_services import SheetDB
 
 # Page Configuration (Must be the first Streamlit command)
 st.set_page_config(page_title="Admin", page_icon="⚙️", layout="wide")
@@ -7,23 +9,37 @@ st.set_page_config(page_title="Admin", page_icon="⚙️", layout="wide")
 # Main Content
 st.title("⚙️ Administration")
 
-st.write("Create a new competition.")
+st.header("Create a new competition")
 
 with st.form("create_comp_form"):
-    comp_name: str = st.text_input("Competition Name", placeholder="e.g. Australian National & Freestyle Championships 2025")
-    admin_email: str = st.text_input("Admin Gmail", placeholder="you@gmail.com")
-    submitted: bool = st.form_submit_button("🚀 Create Competition")
+    comp_name: str = st.text_input("Competition Name", placeholder="e.g. Australian National & Freestyle Championships 2025", help="A name to use in the pages", icon="🏆", max_chars=70)
+    admin_email: str = st.text_input("Email", placeholder="you@gmail.com", help="Valid email to send access links", icon="📧")
+    user_name: str = st.text_input("Name", placeholder="Maverik", help="Just used for salutation", icon="👋🏻", max_chars=50)
+    password: str = st.text_input("Password", type="password", help="Something so the system knows it's you", icon="🔐")
+    submitted: bool = st.form_submit_button("Create Competition", icon="🚀", type="primary")
 
     if submitted:
-        if not comp_name or not admin_email:
-            st.warning("Please fill in both fields.")
+        user = try_create_user(user_name, admin_email, password, "admin")
+        if not user:
+            st.stop()
 
         with st.spinner("Creating competition file..."):
-            service = get_google_service()
-            new_sheet_id, comp_url = service.create_competition_sheet(comp_name=comp_name, admin_email=admin_email) or (None, None)
+            sheet_id, comp_url = create_competition_sheet(comp_name=comp_name, admin_email=admin_email) or (None, None)
 
-        if new_sheet_id and comp_url:
-            st.success("Competition created successfully and sent to your email!")
-            st.link_button("Open Comp App!", url=comp_url, type="secondary", icon="⚙️")
+        if sheet_id and comp_url:
+            st.success(f"Competition created successfully and an email sent to you {user.username}!")
+
+            db = SheetDB.connect(sheet_id)
+            success, msg = db.register_user(user)
+            if success:
+                st.success(msg, icon="✅")
+            else:
+                st.error(msg, icon="❌")
+            
+            st.link_button("Login", url=comp_url, type="secondary", icon="⚙️")
+            st.link_button("Configure Comp", url=comp_url, type="secondary", icon="⚙️")
         else:
-            st.error("Could not create competition.")
+            st.error("Could not create competition sheet (DB).", icon="❌")
+        
+
+        
