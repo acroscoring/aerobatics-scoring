@@ -26,40 +26,61 @@ class CreateCompetitionResponse(BaseModel):
 # --------------------------------------------------------------------------------------------------------------
 
 @st.cache_resource
-def _get_global_gspread_client():
+def _get_gspread_client() -> gspread.Client:
     try:
         creds_dict = st.secrets["gcp_service_account"]
         return gspread.service_account_from_dict(creds_dict)
     except KeyError as e:
-        st.error(f"Missing Secret Configuration: {e}")
+        st.error(f"Missing SpreadSheet Secret Configuration: {e}")
         raise
     except Exception as e:
-        st.error(f"Authentication Failed: {e}")
+        st.error(f"SpreadSheet Authentication Failed: {e}")
         raise
+
+@st.cache_resource
+def _get_sheet_by_id(sheet_id: str) -> Optional[gspread.spreadsheet.Spreadsheet]:
+    try:
+        gspread_client = _get_gspread_client()
+        return gspread_client.open_by_key(sheet_id)
+    except Exception as e:
+        st.error(f"Failed to open competition: {e}")
+        return None
+
+@st.cache_resource
+def _get_genai_client():
+    try:
+        api_key: str = st.secrets["google_gemini"]["api_key"]
+        return genai.Client(api_key=api_key)
+    except KeyError as e:
+        st.error(f"Missing AI Secret Configuration: {e}")
+        raise
+    except Exception as e:
+        st.error(f"AI Authentication Failed: {e}")
+        raise
+
+# --------------------------------------------------------------------------------------------------------------
 
 class GoogleServices:
     """
     Singleton service to handle Google Sheets interactions securely.
     """
-    
-    def __init__(self):
-        self._client = _get_global_gspread_client()
-        self._api_url: str = st.secrets["google_app_script"]["prod_url"] if st.secrets["env"]["type"] == "prod" else st.secrets["google_app_script"]["dev_url"]
-        self._api_secret: str = st.secrets["google_app_script"]["api_secret"]
-        self._bot_email: str = st.secrets["gcp_service_account"]["client_email"]
-        self._api_key: str = st.secrets["google_gemini"]["api_key"]
 
-    def create_competition_sheet(self, comp_name: str, admin_email: str, current_url: HttpUrl) -> Optional[tuple[str, str]]:
+    def create_competition_sheet(self, comp_name: str, admin_email: str) -> Optional[tuple[str, str]]:
         try:
+            if not st.context.url:
+                st.error(f"Error getting context url.")
+                return None
+
             payload = CreateCompetition(
                 comp_name = comp_name,
                 admin_email = admin_email,
-                bot_email = self._bot_email,
-                app_url = current_url,
-                api_secret = self._api_secret
+                bot_email = st.secrets["gcp_service_account"]["client_email"],
+                app_url = HttpUrl(st.context.url), # no query parameters
+                api_secret = st.secrets["google_app_script"]["api_secret"]
             )
             
-            response = requests.post(self._api_url, json=payload.model_dump(mode='json'))
+            api_url: str = st.secrets["google_app_script"]["prod_url"] if st.secrets["env"]["type"] == "prod" else st.secrets["google_app_script"]["dev_url"]
+            response = requests.post(api_url, json=payload.model_dump(mode='json'))
             
             if response.status_code == 200:
                 result = CreateCompetitionResponse(**response.json())
@@ -73,17 +94,16 @@ class GoogleServices:
                 st.error(f"HTTP Error: {response.status_code} - {response.text}")
                 return None
 
+        except KeyError as e:
+            st.error(f"Missing API URL Secret Configuration: {e}")
+            return None
         except Exception as e:
             st.error(f"Failed to connect to Factory API: {e}")
             return None
-
+    
     def get_sheet_by_id(self, sheet_id: str) -> Optional[gspread.spreadsheet.Spreadsheet]:
-        try:
-            return self._client.open_by_key(sheet_id)
-        except Exception as e:
-            st.error(f"Failed to open competition: {e}")
-            return None
-        
+        return _get_sheet_by_id(sheet_id)
+
     def save_to_sheet(self, sheet_data: score_service.ScoreSheet) -> None:
         """Placeholder for your future backend logic"""
         st.toast("Saving data to cloud...", icon="☁️")
@@ -97,9 +117,9 @@ class GoogleServices:
     
     def get_scoring_sheet_data_using_ai(self, image: Image.Image) -> Optional[score_service.ScoreSheet]:
         try:
-            client = genai.Client(api_key=self._api_key)
+            genai_client = _get_genai_client()
             prompt = "Extract the data from this aerobatics score sheet. Return 0 for missing values."
-            response = client.models.generate_content(
+            response = genai_client.models.generate_content(
                 model="gemini-3-flash-preview", # gemini-3-flash-preview -> gemini-2.5-pro -> gemini-2.5-flash
                 contents=[
                     image,  # Image 1st

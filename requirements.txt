@@ -9,6 +9,5 @@ pydantic[email]
 pillow
 pandas
 requests
-streamlit-javascript
 streamlit-authenticator
 bcrypt
