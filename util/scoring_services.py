@@ -1,6 +1,5 @@
-import streamlit as st
 from pydantic import BaseModel, Field, EmailStr, field_validator, ValidationError
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import bcrypt
 from typing import Literal
 
@@ -28,30 +27,24 @@ class User(BaseModel):
     @field_validator('password')
     @classmethod
     def hash_password(cls, v: str) -> str:
-        """
-        Automatically hashes the password when the model is created.
-        If the password is already hashed (starts with $2b$), leave it alone.
-        """
-        if v.startswith("$2b$"): 
-            return v
-        
-        # Hash the plain text password
-        # bcrypt requires bytes, so we encode, hash, then decode back to str
         hashed = bcrypt.hashpw(v.encode('utf-8'), bcrypt.gensalt())
         return hashed.decode('utf-8')
 
-    def to_sheet_row(self) -> List[str]:
-        """Helper to convert the object to a list for Google Sheets"""
-        return [self.username, self.email, self.password, self.role]
+    def to_sheet_row(self, headers: List[str]) -> List[str]:
+        data = self.model_dump()
+        return [str(data.get(h)) for h in headers]
+
+    @classmethod
+    def from_sheet_record(cls, record: Dict[str, Any]) -> "User":
+        return cls(**record)
     
     def verify_password(self, plain_password: str) -> bool:
-        """Helper to check if a plain password matches this user's hash"""
         return bcrypt.checkpw(
             plain_password.encode('utf-8'), 
             self.password.encode('utf-8')
         )
     
-def try_create_user(username: str, email: str, password: str, role: RoleType) -> User | None:
+def try_create_user(username: str, email: str, password: str, role: RoleType) -> User:
     try:
         user = User(
             username=username,
@@ -70,14 +63,12 @@ def try_create_user(username: str, email: str, password: str, role: RoleType) ->
             
             # Display a specific error message for the specific field
             if field_name == "password":
-                st.error(f"Password Error: {message}", icon="🔐")
+                raise ValueError(f"Password Error: {message}")
             elif field_name == "email":
-                st.error(f"Email Error: {message}", icon="📧")
+                raise ValueError(f"Email Error: {message}")
             else:
-                st.error(f"{field_name.title()}: {message}", icon="❌")
-                
-        return None
+                raise ValueError(f"{field_name.title()}: {message}")
         
+        raise Exception("Pydantic user ValidationError didn't work")
     except Exception as e:
-        st.error(f"Error creating user: {e}", icon="❌")
-        return None
+        raise Exception(f"Error creating user: {e}")

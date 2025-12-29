@@ -1,9 +1,9 @@
 import streamlit as st
-from util.google_services import SheetDB, get_scoring_sheet_data_using_ai
-import util.streamlit_services as st_service
+from util.google_services import get_scoring_sheet_data_using_ai
+from util.streamlit_services import get_comp_id_or_stop, get_db_or_stop, error_and_stop, get_session_state_singleton, delete_session_state, set_session_state
 from PIL import Image
 import pandas as pd
-import util.scoring_services as score_service
+from util.scoring_services import ScoreSheet, FigureScore
 from typing import cast, List, Dict, Any
 
 # Page Configuration (Must be the first Streamlit command)
@@ -11,22 +11,16 @@ st.set_page_config(page_title="Competition", page_icon="🏆", layout="wide")
 
 # Main Content
 st.title("🏆 Competition Scoring")
-    
-# Query Params
-query_params = st.query_params
-comp_id = query_params.get("comp_id")
-if not comp_id:
-    st.error("Invalid Competition Link", icon="❌")
-    st.stop()
 
-db = SheetDB.connect(comp_id)
+comp_id = get_comp_id_or_stop()
+db = get_db_or_stop(comp_id)
 
 st.header(db.get_title())
 
 st.markdown("### 📸 Capture Score Sheet")
 st.divider()
 
-current_score_sheet: score_service.ScoreSheet = st_service.get_session_state_singleton("current_score_sheet", None)
+current_score_sheet: ScoreSheet = get_session_state_singleton("current_score_sheet", None)
 if not current_score_sheet:
     input_method = st.radio("Input method:", ["Upload Image", "Use Camera"], horizontal=True)
     img_file = st.camera_input("Take a picture", key="widget_camera") if input_method == "Use Camera" else st.file_uploader("Choose file", type=["jpg", "jpeg", "png", "heic", "heif", "webp"], key="widget_uploader")
@@ -38,17 +32,18 @@ if not current_score_sheet:
         if not current_score_sheet:
             st.image(image, caption="Image uploaded, looks correct?")
 
-        if st.button("Extract Scores from Image", type="primary", icon="👀"):
-            with st.spinner("AI is analyzing handwriting..."):
+        with st.spinner("AI is analyzing the image...", show_time=True):
+            try:
                 new_score_sheet = get_scoring_sheet_data_using_ai(image)
                 if new_score_sheet:
                     current_score_sheet = new_score_sheet
-                    st_service.set_session_state("current_score_sheet", current_score_sheet)
+                    set_session_state("current_score_sheet", current_score_sheet)
                     st.rerun() # Force a refresh to show the edit form immediately
+            except Exception as e:
+                error_and_stop(e)
 
         
-
-if current_score_sheet:
+else:
     st.subheader("📝 Verify & Edit Data")
 
     # Editable Metadata (Columns for better layout)
@@ -91,23 +86,23 @@ if current_score_sheet:
                 raw_data = cast(List[Dict[str, Any]], edited_df.to_dict(orient="records")) # type: ignore
 
                 # Re-construct Figures safely
-                updated_figures = [score_service.FigureScore(**row) for row in raw_data]
+                updated_figures = [FigureScore(**row) for row in raw_data]
 
-                final_score_sheet = score_service.ScoreSheet(
+                final_score_sheet = ScoreSheet(
                     pilot_id=pilot_id,
                     flight_number=flight_num,
                     judge_id=judge_id,
                     figures=updated_figures
                 )
 
-                db.save_to_sheet(final_score_sheet)
+                # db.save_to_sheet(final_score_sheet)
                 
             except Exception as e:
                 st.error(f"Validation Error: {e}", icon="❌")
         
     with col2:
-        if st.button("Reset", type="secondary", icon="❌"):
-            st_service.delete_session_state("current_score_sheet")
-            st_service.delete_session_state("widget_uploader")
-            st_service.delete_session_state("widget_camera")
+        if st.button("Reset", type="secondary", icon="⏪", help="Clear all back to the start"):
+            delete_session_state("current_score_sheet")
+            delete_session_state("widget_uploader")
+            delete_session_state("widget_camera")
             st.rerun()

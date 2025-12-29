@@ -1,10 +1,11 @@
-import streamlit as st
+#import streamlit as st
+from streamlit import cache_resource, secrets, context
 import requests
 import gspread
-from typing import Optional, cast, Literal
+from typing import Optional, cast, Literal, Any, List
 from google import genai
 from PIL import Image
-import util.streamlit_services as st_service
+from util.streamlit_services import get_session_state_singleton
 import util.scoring_services as score_service
 from pydantic import BaseModel, EmailStr, HttpUrl
 
@@ -23,85 +24,85 @@ class CreateCompetitionResponse(BaseModel):
     sheet_id: Optional[str] = None
     comp_url: Optional[HttpUrl] = None
 
+class DatabaseConnectionError(Exception):
+    pass
+
+class AiConnectionError(Exception):
+    pass
+
+class UserAlreadyExistsError(Exception):
+    pass
+
 # --------------------------------------------------------------------------------------------------------------
 
-@st.cache_resource(show_spinner="Getting Connection...", show_time=True)
-def _get_gspread_client() -> gspread.Client:
+@cache_resource(show_spinner="Getting Connection...", show_time=True)
+def _get_gspread_client(creds_dict: dict[str, Any]) -> gspread.Client:
     try:
-        creds_dict = st.secrets["gcp_service_account"]
         return gspread.service_account_from_dict(creds_dict)
-    except KeyError as e:
-        st.error(f"Missing Bot Secret Configuration: {e}", icon="❌")
-        raise
     except Exception as e:
-        st.error(f"Bot Authentication Failed: {e}", icon="❌")
-        raise
+        raise DatabaseConnectionError(f"Bot Authentication Failed: {e}")
+        
 
-@st.cache_resource(show_spinner="Getting DB...", show_time=True)
-def _get_sheet_by_id(sheet_id: str) -> Optional[gspread.spreadsheet.Spreadsheet]:
+@cache_resource(show_spinner="Getting DB...", show_time=True)
+def _get_sheet_by_id(sheet_id: str) -> gspread.spreadsheet.Spreadsheet:
     try:
-        gspread_client = _get_gspread_client()
+        creds_dict = dict(secrets["gcp_service_account"])
+        gspread_client = _get_gspread_client(creds_dict)
         return gspread_client.open_by_key(sheet_id)
-    except Exception as e:
-        st.error(f"Failed to open competition sheet (DB): {e}", icon="❌")
-        return None
-
-@st.cache_resource(show_spinner="Getting AI Connection...", show_time=True)
-def _get_genai_client():
-    try:
-        api_key: str = st.secrets["google_gemini"]["api_key"]
-        return genai.Client(api_key=api_key)
     except KeyError as e:
-        st.error(f"Missing AI Secret Configuration: {e}", icon="❌")
-        raise
+        raise DatabaseConnectionError(f"Missing Bot Secret Configuration: {e}")
     except Exception as e:
-        st.error(f"AI Authentication Failed: {e}", icon="❌")
-        raise
+        raise DatabaseConnectionError(f"Failed to open competition sheet (DB): {e}")
+
+@cache_resource(show_spinner="Getting AI Connection...", show_time=True)
+def _get_genai_client(api_key: str):
+    try:
+        return genai.Client(api_key=api_key)
+    except Exception as e:
+        raise AiConnectionError(f"AI Authentication Failed: {e}")
 
 # --------------------------------------------------------------------------------------------------------------
 
-def create_competition_sheet(comp_name: str, admin_email: str) -> Optional[tuple[str, str]]:
+def create_competition_sheet_db(comp_name: str, admin_email: str) -> str:
     try:
-        if not st.context.url:
-            st.error(f"Error getting context URL.", icon="❌")
-            return None
+        if not context.url:
+            raise Exception(f"Error getting context URL.")
 
         payload = CreateCompetition(
             comp_name = comp_name,
             admin_email = admin_email,
-            bot_email = st.secrets["gcp_service_account"]["client_email"],
-            app_url = HttpUrl(st.context.url), # no query parameters
-            api_secret = st.secrets["google_app_script"]["api_secret"]
+            bot_email = secrets["gcp_service_account"]["client_email"],
+            app_url = HttpUrl(context.url), # no query parameters
+            api_secret = secrets["google_app_script"]["api_secret"]
         )
         
-        api_url: str = st.secrets["google_app_script"]["prod_url"] if st.secrets["env"]["type"] == "prod" else st.secrets["google_app_script"]["dev_url"]
+        api_url: str = secrets["google_app_script"]["prod_url"] if secrets["env"]["type"] == "prod" else secrets["google_app_script"]["dev_url"]
         response = requests.post(api_url, json=payload.model_dump(mode='json'))
         
-        if response.status_code == 200:
-            result = CreateCompetitionResponse(**response.json())
-            
-            if result.status == "Success":
-                return str(result.sheet_id), str(result.comp_url)
-            else:
-                st.error(f"Create Competition Apps Script Error: {result.message}", icon="❌")
-                return None
-        else:
-            st.error(f"HTTP Error: {response.status_code} - {response.text}", icon="❌")
-            return None
-
+        if response.status_code != 200:
+            raise DatabaseConnectionError(f"HTTP Error: {response.status_code} - {response.text}")
+    
+        result = CreateCompetitionResponse(**response.json())
+        
+        if result.status != "Success":
+            raise DatabaseConnectionError(f"Create Competition Apps Script Error: {result.message}")
+        
+        if not result.sheet_id:
+            raise DatabaseConnectionError(f"Sheet (DB) ID Error")
+        
+        return result.sheet_id
     except KeyError as e:
-        st.error(f"Missing API URL Secret Configuration: {e}", icon="❌")
-        return None
+        raise DatabaseConnectionError(f"Missing API URL Secret Configuration: {e}")
     except Exception as e:
-        st.error(f"Failed to create competition sheet (DB): {e}", icon="❌")
-        return None
+        raise DatabaseConnectionError(f"Failed to create competition sheet (DB): {e}")
 
-def get_scoring_sheet_data_using_ai(image: Image.Image) -> Optional[score_service.ScoreSheet]:
+def get_scoring_sheet_data_using_ai(image: Image.Image) -> score_service.ScoreSheet:
     try:
-        genai_client = _get_genai_client()
+        api_key: str = secrets["google_gemini"]["api_key"]
+        genai_client = _get_genai_client(api_key)
         prompt = "Extract the data from this aerobatics score sheet. Return 0 for missing values."
         response = genai_client.models.generate_content(
-            model="gemini-3-flash-preview", # gemini-3-flash-preview -> gemini-2.5-pro -> gemini-2.5-flash
+            model=secrets["google_gemini"]["model"],
             contents=[
                 image,  # Image 1st
                 prompt  # Prompt 2nd as per Google best practice https://ai.google.dev/gemini-api/docs/image-understanding#tips-best-practices
@@ -112,8 +113,10 @@ def get_scoring_sheet_data_using_ai(image: Image.Image) -> Optional[score_servic
             },
         )
         return cast(score_service.ScoreSheet, response.parsed)
+    except KeyError as e:
+        raise Exception(f"Missing AI Secret Configuration: {e}")
     except Exception as e:
-        st.error(f"AI getting score error: {e}", icon="❌")
+        raise Exception(f"AI getting score error: {e}")
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -123,53 +126,47 @@ class SheetDB:
     Usage: db = SheetDB.connect("your_sheet_id_here")
     """
     def __init__(self, sheet_id: str):
-        sheet = _get_sheet_by_id(sheet_id)
-        if not sheet:
-            st.error("Competition Not Found", icon="❌")
-            st.stop()
-        
-        self._sheet = sheet
-        self.sheet_id = sheet_id
+        try:
+            self._sheet = _get_sheet_by_id(sheet_id)
+            if not self._sheet:
+                raise DatabaseConnectionError(f"Competition not found ({sheet_id})")
+
+            self._users_ws = self._sheet.worksheet("Users")
+            self._users_headers = self._users_ws.row_values(1)
+            if not self._users_headers:
+                raise DatabaseConnectionError("Users tab headers row missing")
+        except Exception as e:
+            raise DatabaseConnectionError(f"Error getting sheet (DB) details: {e}")
     
     @classmethod
     def connect(cls, sheet_id: str) -> "SheetDB":
         session_key = f"SheetDB_{sheet_id}"
-        return st_service.get_session_state_singleton(session_key, cls(sheet_id))
+        return get_session_state_singleton(session_key, cls(sheet_id))
 
     def get_title(self) -> str:
         return self._sheet.title
     
-    def register_user(self, user: score_service.User) -> tuple[bool, str]:
-        """
-        Checks if email exists. If not, adds the user.
-        Returns: (Success Boolean, Message String)
-        """
+    def get_all_users(self) -> List[score_service.User]:
         try:
-            ws = self._sheet.worksheet("Users")
-
-            # col_values(2) returns a list of all strings in the 2nd column (email)
-            existing_emails = ws.col_values(2)
+            records = self._users_ws.get_all_records()
+            users = [score_service.User.from_sheet_record(r) for r in records]
+            return users
+        except Exception as e:
+            raise Exception(f"Error fetching users: {e}")
+    
+    def register_user(self, user: score_service.User):
+        try:
+            current_users = self.get_all_users()
+            existing_emails = {u.email for u in current_users}
             
             if user.email in existing_emails:
-                return False, f"User with email {user.email} already exists. Please login."
+                raise UserAlreadyExistsError(f"Email {user.email} already exists.")
 
-            row_data = user.to_sheet_row()
-            ws.append_row(row_data)
-            return True, "User created successfully!"
-
+            row_data = user.to_sheet_row(self._users_headers)
+            self._users_ws.append_row(row_data)
         except Exception as e:
-            return False, f"Register User Error: {str(e)}"
+            raise Exception(f"Register User Error: {e}")
 
-    def save_to_sheet(self, sheet_data: score_service.ScoreSheet) -> None:
-        """Placeholder for your future backend logic"""
-        st.toast("Saving data to cloud...", icon="☁️")
-        # Convert Pydantic object to a clean dictionary for the API/JSON
-        # exclude_none=True helps keep the payload clean if fields are empty
-        payload = sheet_data.model_dump(exclude_none=True)
-        
-        # In a real app, you would do: requests.post(url, json=payload)
-        st.code(payload, language="json") 
-        st.success("Success! Payload constructed from strongly typed class.")
 
 
     
