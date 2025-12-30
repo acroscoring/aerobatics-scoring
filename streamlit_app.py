@@ -5,7 +5,12 @@ pages = [
     st.Page("pages/read_me.py", title="Read Me",icon="📖"),
     st.Page("pages/admin.py", title="Admin",icon="⚙️"),
     st.Page("pages/comp.py", title="Competition",icon="🏆"),
+    st.Page("pages/register.py", title="Register",icon="📝"),
+    st.Page("pages/login.py", title="Login",icon="🔐"),
 ]
 
 page = st.navigation(pages)
 page.run()
+
+with st.sidebar:
+    st.write(st.session_state)

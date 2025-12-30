@@ -1,0 +1,4 @@
+cookie:
+  name: "comp_manager_auth"
+  key: "0C3HM0a6fqNk1XkSwU7u8DSW1cU2_OrGiV4F_RZLCJ5M-HA4gfqW6HOUaW0j-JU0YkDPqaHO2OqTOhiBEk"
+  expiry_days: 30

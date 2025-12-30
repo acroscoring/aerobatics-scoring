@@ -1,26 +1,18 @@
 import streamlit as st
-from util.google_services import get_scoring_sheet_data_using_ai
-from util.streamlit_services import get_comp_id_or_stop, get_db_or_stop, error_and_stop, get_session_state_singleton, delete_session_state, set_session_state
+from util.controller import CompScoreSheetAi
 from PIL import Image
 import pandas as pd
-from util.scoring_services import ScoreSheet, FigureScore
-from typing import cast, List, Dict, Any
 
-# Page Configuration (Must be the first Streamlit command)
 st.set_page_config(page_title="Competition", page_icon="🏆", layout="wide")
-
-# Main Content
 st.title("🏆 Competition Scoring")
 
-comp_id = get_comp_id_or_stop()
-db = get_db_or_stop(comp_id)
-
-st.header(db.get_title())
+controller = CompScoreSheetAi()
+st.header(controller.get_comp_title())
 
 st.markdown("### 📸 Capture Score Sheet")
 st.divider()
 
-current_score_sheet: ScoreSheet = get_session_state_singleton("current_score_sheet", None)
+current_score_sheet = controller.get_score_sheet_singleton()
 if not current_score_sheet:
     input_method = st.radio("Input method:", ["Upload Image", "Use Camera"], horizontal=True)
     img_file = st.camera_input("Take a picture", key="widget_camera") if input_method == "Use Camera" else st.file_uploader("Choose file", type=["jpg", "jpeg", "png", "heic", "heif", "webp"], key="widget_uploader")
@@ -33,16 +25,9 @@ if not current_score_sheet:
             st.image(image, caption="Image uploaded, looks correct?")
 
         with st.spinner("AI is analyzing the image...", show_time=True):
-            try:
-                new_score_sheet = get_scoring_sheet_data_using_ai(image)
-                if new_score_sheet:
-                    current_score_sheet = new_score_sheet
-                    set_session_state("current_score_sheet", current_score_sheet)
-                    st.rerun() # Force a refresh to show the edit form immediately
-            except Exception as e:
-                error_and_stop(e)
+            controller.get_scoring_using_ai(image)
+            st.rerun() # Force a refresh to show the edit form immediately
 
-        
 else:
     st.subheader("📝 Verify & Edit Data")
 
@@ -72,37 +57,9 @@ else:
         key="editor_changes" # Unique key
     )
 
-    # Average Score
-    if not edited_df.empty:
-        avg_score = edited_df["score"].mean()
-        display_avg = f"{avg_score:.1f}" if pd.notna(avg_score) else "0.00" # Handle NaN if table is empty
-        st.metric("Average Score", display_avg)
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("Submit Verified Scores", type="primary", icon="✅"):
-            try:
-                # Convert DataFrame to a list of dicts
-                raw_data = cast(List[Dict[str, Any]], edited_df.to_dict(orient="records")) # type: ignore
-
-                # Re-construct Figures safely
-                updated_figures = [FigureScore(**row) for row in raw_data]
-
-                final_score_sheet = ScoreSheet(
-                    pilot_id=pilot_id,
-                    flight_number=flight_num,
-                    judge_id=judge_id,
-                    figures=updated_figures
-                )
-
-                # db.save_to_sheet(final_score_sheet)
-                
-            except Exception as e:
-                st.error(f"Validation Error: {e}", icon="❌")
+    if st.button("Submit Verified Scores", type="primary", icon="✅"):
+        controller.save_scoring_sheet_data_to_db(pilot_id=pilot_id, flight_num=flight_num, judge_id=judge_id, df=edited_df)
         
-    with col2:
-        if st.button("Reset", type="secondary", icon="⏪", help="Clear all back to the start"):
-            delete_session_state("current_score_sheet")
-            delete_session_state("widget_uploader")
-            delete_session_state("widget_camera")
-            st.rerun()
+    if st.button("Reset", type="secondary", icon="⏪", help="Clear all back to the start"):
+        controller.reset_comp_ai_ui()
+        st.rerun()

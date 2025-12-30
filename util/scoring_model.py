@@ -72,3 +72,17 @@ def try_create_user(username: str, email: str, password: str, role: RoleType) ->
         raise Exception("Pydantic user ValidationError didn't work")
     except Exception as e:
         raise Exception(f"Error creating user: {e}")
+
+
+class Judge(BaseModel):
+    id: str = Field(..., min_length=2, max_length=2)
+    name: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr
+
+    def to_sheet_row(self, headers: List[str]) -> List[str]:
+        data = self.model_dump()
+        return [str(data.get(h)) for h in headers]
+
+    @classmethod
+    def from_sheet_record(cls, record: Dict[str, Any]) -> "Judge":
+        return cls(**record)

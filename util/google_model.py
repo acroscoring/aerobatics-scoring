@@ -3,11 +3,11 @@ from streamlit import cache_resource, secrets, context
 import requests
 import gspread
 from typing import Optional, cast, Literal, Any, List
+from pydantic import BaseModel, EmailStr, HttpUrl
 from google import genai
 from PIL import Image
-from util.streamlit_services import get_session_state_singleton
-import util.scoring_services as score_service
-from pydantic import BaseModel, EmailStr, HttpUrl
+import util.controller as controller
+import util.scoring_model as sm
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -96,7 +96,7 @@ def create_competition_sheet_db(comp_name: str, admin_email: str) -> str:
     except Exception as e:
         raise DatabaseConnectionError(f"Failed to create competition sheet (DB): {e}")
 
-def get_scoring_sheet_data_using_ai(image: Image.Image) -> score_service.ScoreSheet:
+def get_scoring_sheet_data_using_ai(image: Image.Image) -> sm.ScoreSheet:
     try:
         api_key: str = secrets["google_gemini"]["api_key"]
         genai_client = _get_genai_client(api_key)
@@ -109,10 +109,10 @@ def get_scoring_sheet_data_using_ai(image: Image.Image) -> score_service.ScoreSh
             ],
             config={
                 "response_mime_type": "application/json",
-                "response_schema": score_service.ScoreSheet,
+                "response_schema": sm.ScoreSheet,
             },
         )
-        return cast(score_service.ScoreSheet, response.parsed)
+        return cast(sm.ScoreSheet, response.parsed)
     except KeyError as e:
         raise Exception(f"Missing AI Secret Configuration: {e}")
     except Exception as e:
@@ -131,30 +131,35 @@ class SheetDB:
             if not self._sheet:
                 raise DatabaseConnectionError(f"Competition not found ({sheet_id})")
 
+            self.sheet_title = self._sheet.title
             self._users_ws = self._sheet.worksheet("Users")
             self._users_headers = self._users_ws.row_values(1)
             if not self._users_headers:
                 raise DatabaseConnectionError("Users tab headers row missing")
+            
+            self._judges_ws = self._sheet.worksheet("Judges")
+            self._judges_headers = self._users_ws.row_values(1)
+            if not self._judges_headers:
+                raise DatabaseConnectionError("Judges tab headers row missing")
+
+            self.sheet_id = sheet_id
         except Exception as e:
             raise DatabaseConnectionError(f"Error getting sheet (DB) details: {e}")
     
     @classmethod
     def connect(cls, sheet_id: str) -> "SheetDB":
         session_key = f"SheetDB_{sheet_id}"
-        return get_session_state_singleton(session_key, cls(sheet_id))
-
-    def get_title(self) -> str:
-        return self._sheet.title
+        return controller.get_session_state_singleton(session_key, cls(sheet_id))
     
-    def get_all_users(self) -> List[score_service.User]:
+    def get_all_users(self) -> List[sm.User]:
         try:
             records = self._users_ws.get_all_records()
-            users = [score_service.User.from_sheet_record(r) for r in records]
+            users = [sm.User.from_sheet_record(r) for r in records]
             return users
         except Exception as e:
             raise Exception(f"Error fetching users: {e}")
     
-    def register_user(self, user: score_service.User):
+    def register_user(self, user: sm.User):
         try:
             current_users = self.get_all_users()
             existing_emails = {u.email for u in current_users}
@@ -167,6 +172,22 @@ class SheetDB:
         except Exception as e:
             raise Exception(f"Register User Error: {e}")
 
+    def save_scoring_sheet_data(self, score_data: sm.ScoreSheet):
+        pass    
 
+    def get_all_judges(self) -> List[sm.Judge]:
+        try:
+            records = self._judges_ws.get_all_records(numericise_ignore=['all'])
+            judges = [sm.Judge.from_sheet_record(r) for r in records]
+            return judges
+        except Exception as e:
+            raise Exception(f"Error fetching judges: {e}")
 
-    
+    def get_judge_details(self, judge_id: str) -> sm.Judge:
+        all_judges = self.get_all_judges()    
+        judge = next((j for j in all_judges if j.id == judge_id), None)
+
+        if judge is None:
+            raise Exception(f"Judge with ID {judge_id} not found in sheet (DB)")
+
+        return judge
