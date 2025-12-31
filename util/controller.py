@@ -1,11 +1,12 @@
 import streamlit as st
-from typing import Any, List, Dict, cast, Optional
+from typing import Any, List, Dict, cast
 import util.google_model as gm
 import util.scoring_model as sm
+import util.security_model as sec
 from PIL.Image import Image
 from pandas import DataFrame
-import streamlit_authenticator as stauth # type: ignore
-import yaml
+import extra_streamlit_components as stx # type: ignore
+import uuid
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -56,7 +57,7 @@ def _get_comp_id_from_query_params() -> str:
     comp_id = st.query_params.get("comp_id")
     
     if not comp_id:
-        raise MissingCompId("No competition ID found in URL (query parameter comp_id).")
+        raise MissingCompId("No competition ID found. Please use the link provided by the competition admin.")
     
     _set_comp_id_session_state(comp_id)
     return comp_id
@@ -193,67 +194,61 @@ class RegisterNewJudge:
 
 class AuthService:
     def __init__(self):
-        _get_comp_id_or_stop()
-        self._db = _get_db_or_stop()
-        
-        with open('./util/login_config.yaml') as file:
-            self.yaml_config = yaml.load(file, Loader=yaml.loader.SafeLoader)
-        
-        self.full_config = self._build_dynamic_config()
-        
-        self.authenticator = stauth.Authenticate(
-            credentials=self.full_config['credentials'],
-            cookie_name=self.full_config['cookie']['name'],
-            cookie_key=self.full_config['cookie']['key'],
-            cookie_expiry_days=self.full_config['cookie']['expiry_days'],
-        )
+        self._cookie_name = "aeroscore_auth_token"
+        self._cookie_manager = get_session_state_singleton("cookie_manager", stx.CookieManager())
+        cookies = self._cookie_manager.get_all()
 
-    def _build_dynamic_config(self) -> Dict[str, Any]:
-        users_from_db = self._db.get_all_users()
-        
-        user_dict = {}
-        for u in users_from_db:
-            user_dict[u.email] = {
-                'email': u.email,
-                'name': u.username,
-                'password': u.password,
-                'role': u.role
-            }
-            
-        return {
-            'credentials': {'usernames': user_dict},
-            'cookie': {
-                'name': f"{self.yaml_config['cookie']['name']}_{self._db.sheet_id}", # dynamic sheet ID to namespace the cookie so logins don't clash across competitions
-                'key': self.yaml_config['cookie']['key'],
-                'expiry_days': self.yaml_config['cookie']['expiry_days']
-            }
-        }
-    
-    def get_comp_title(self) -> str:
-        return self._db.sheet_title
-
-    def login(self):
+        comp_id = None
         try:
-            self.authenticator.login( # type: ignore
-                max_login_attempts=6, 
-                fields={'Form name':f"{self.get_comp_title()} - Login", 'Username':'Email', 'Password':'Password', 'Login':'Login', 'Captcha':'Captcha'}
-            ) 
-        except Exception as e:
-            st.error(e)
-            
-        if _get_session_state('authentication_status') is False:
-            st.error('Username or password is incorrect')
-    
-    def get_user_name(self) -> str:
-        return _get_session_state("name")
-    
-    def get_user_email(self) -> str:
-        return _get_session_state("username")
-    
-    def get_user_role(self) -> str:
-        roles: Optional[List[str]] = _get_session_state("roles")
-        if roles:
-            return roles[0]
-        else:
-            return ""
+            comp_id = _get_comp_id_or_stop()
+        except MissingCompId:
+            comp_id = None
 
+        token = cookies.get(self._cookie_name)
+        if token:
+            auth_user = sec.decode_token(token)
+            if auth_user:
+                _set_session_state("auth_user", auth_user)
+                self.auth_user = auth_user
+
+                if not comp_id:
+                    comp_id = auth_user.comp_id
+                    _set_comp_id_session_state(auth_user.comp_id)
+                
+                if comp_id != auth_user.comp_id:
+                    self.logout()
+
+        self.comp_id = comp_id
+        self._db = _get_db_or_stop()
+
+
+    def login(self, email: str, password: str):
+        try:
+            user = dict(self._db.authenticate_user(email=email, password=password))
+            user["comp_id"] = _get_comp_id_or_stop()
+            auth_user = sm.try_create_authuser(user)
+            _set_session_state("auth_user", auth_user)
+            self.auth_user = auth_user
+            token = sec.create_token(auth_user)
+            self._cookie_manager.set(self._cookie_name, token, sec.get_token_expire())
+            st.toast(f"Logged in {auth_user.username}! Reloading...")
+            st.rerun()
+        except Exception as e:
+            _error_and_stop(e)
+
+    def forgot_password(self, email: str):
+        try:
+            self._db.get_user_by_email(email)    
+            temp_pass = str(uuid.uuid4())[:6] # Simple 6 char random string
+            self._db.update_user_password(email, temp_pass)
+            # Send email with new password
+            st.toast("Check your email for the temporary password.")
+        except Exception as e:
+            _error_and_stop(e)
+
+    def logout(self):
+        self._cookie_manager.delete(self._cookie_name)
+        _delete_session_state("auth_user")
+        self.auth_user = None
+        st.rerun()
+        

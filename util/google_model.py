@@ -8,6 +8,7 @@ from google import genai
 from PIL import Image
 import util.controller as controller
 import util.scoring_model as sm
+import util.security_model as sec
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -31,6 +32,12 @@ class AiConnectionError(Exception):
     pass
 
 class UserAlreadyExistsError(Exception):
+    pass
+
+class UserEmailNotFound(Exception):
+    pass
+
+class UserInvalidAuth(Exception):
     pass
 
 # --------------------------------------------------------------------------------------------------------------
@@ -159,20 +166,52 @@ class SheetDB:
         except Exception as e:
             raise Exception(f"Error fetching users: {e}")
     
+    def get_user_by_email(self, email: str) -> sm.User:
+        email = email.lower().strip()
+        users = self.get_all_users()
+        user = next((u for u in users if u.email == email), None)
+        if user:
+            return user
+
+        raise UserEmailNotFound(f"User {email} not found in sheet (DB)")
+
     def register_user(self, user: sm.User):
         try:
-            current_users = self.get_all_users()
-            existing_emails = {u.email for u in current_users}
+            self.get_user_by_email(user.email)
+            raise UserAlreadyExistsError(f"Email {user.email} already exists.")
+        except UserEmailNotFound:
+            try:
+                row_data = user.to_sheet_row(self._users_headers)
+                self._users_ws.append_row(row_data)
+            except Exception as e:
+                raise Exception(f"Register user error: {e}")
+
+    def authenticate_user(self, email: str, password: str) -> sm.User:
+        try:
+            user = self.get_user_by_email(email)
+            if user and sec.verify_password(password, user.password):
+                return user
             
-            if user.email in existing_emails:
-                raise UserAlreadyExistsError(f"Email {user.email} already exists.")
-
-            row_data = user.to_sheet_row(self._users_headers)
-            self._users_ws.append_row(row_data)
+            raise UserInvalidAuth("Invalid password")
+        except UserEmailNotFound:
+            raise UserInvalidAuth("Invalid email")
         except Exception as e:
-            raise Exception(f"Register User Error: {e}")
+            raise Exception(f"Auth user error: {e}")
 
+    def update_user_password(self, email: str, new_password: str):
+        try:
+            password_col = self._users_headers.index("password") + 1
+            cell = self._users_ws.find(email, in_column=password_col) # type: ignore
+            if not cell:
+                raise Exception("User not found to update password")
+            
+            hashed_pw = sec.hash_password(new_password)
+            self._users_ws.update_cell(cell.row, cell.col, hashed_pw)
+        except Exception as e:
+            raise Exception(f"Password update error: {e}")
+    
     def save_scoring_sheet_data(self, score_data: sm.ScoreSheet):
+        #to do
         pass    
 
     def get_all_judges(self) -> List[sm.Judge]:
