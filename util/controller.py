@@ -1,5 +1,5 @@
 import streamlit as st
-from typing import Any, List, Dict, cast
+from typing import Any, List, Dict, cast, Callable
 import util.google_model as gm
 import util.data_model as dm
 import util.security_model as sec
@@ -31,9 +31,9 @@ def _delete_session_state(name: str):
     if name in st.session_state:
         del st.session_state[name]
 
-def get_session_state_singleton(name: str, value: Any) -> Any:
+def get_session_state_singleton(name: str, call_lambda: Callable[[], Any]) -> Any:
     if name not in st.session_state:
-        _set_session_state(name, value)
+        _set_session_state(name, call_lambda())
     
     return _get_session_state(name)
 
@@ -58,7 +58,7 @@ class CompDB:
     @classmethod
     def connect(cls, sheet_id: str) -> "CompDB":
         session_key = f"CompDB_{sheet_id}"
-        return get_session_state_singleton(session_key, cls(sheet_id))
+        return get_session_state_singleton(session_key, lambda: cls(sheet_id))
 
     @classmethod
     def connect_or_stop(cls) -> "CompDB":
@@ -127,34 +127,44 @@ class CompDB:
 # --------------------------------------------------------------------------------------------------------------
 
 class AuthService:
-    def __init__(self):
-        self._cookie_name = "aeroscore_auth_token"
-        self._cookie_manager = get_session_state_singleton("cookie_manager", stx.CookieManager())
-
-        auth_user = _get_session_state("auth_user")
-        if not auth_user:
-            cookies = self._cookie_manager.get_all()
-            token = cookies.get(self._cookie_name)
-            if token:
-                auth_user = sec.decode_token(token)
-            
+    def __init__(self, auth_user: dm.AuthUser | None):
         self._set_user(auth_user)
+        self._cookie_name = "aeroscore_auth_token"
+
 
     @classmethod
     def connect(cls) -> "AuthService":
+        auth_user = AuthService._get_auth_user()
         session_key = f"AuthService"
-        return get_session_state_singleton(session_key, cls())
+        return get_session_state_singleton(session_key, lambda: cls(auth_user))
     
     def _set_user(self, auth_user: dm.AuthUser | None):
         _set_session_state("auth_user", auth_user)
         self.user = auth_user
+
+    @staticmethod
+    def _get_cookie_manager():
+        return get_session_state_singleton("cookie_manager", lambda: stx.CookieManager("main_cookie_manage"))
+
+    @staticmethod
+    def _get_auth_user() -> dm.AuthUser | None:
+        auth_user = _get_session_state("auth_user")
+        if auth_user is None:
+            cookie_manager = AuthService._get_cookie_manager()
+            cookies = cookie_manager.get_all()
+            token = cookies.get("aeroscore_auth_token")
+            if token:
+                auth_user = sec.decode_token(token)
+                if auth_user:
+                    _set_session_state("auth_user", auth_user)
+        return auth_user
 
     def login(self, db: gm.SheetDB, email: str, password: str):
         try:
             user = db.authenticate_user(email=email, password=password)
             auth_user = dm.AuthUser.from_user(user=user, comp_id=db.id)
             token = sec.create_token(auth_user)
-            self._cookie_manager.set(self._cookie_name, token, sec.get_token_expire())
+            AuthService._get_cookie_manager().set(self._cookie_name, token, sec.get_token_expire())
             self._set_user(auth_user)
             st.toast(f"Logged in {auth_user.username}! Reloading...")
             st.rerun()
@@ -172,8 +182,8 @@ class AuthService:
             _error_and_stop(e)
 
     def logout(self):
-        if self._cookie_manager.get(self._cookie_name):
-            self._cookie_manager.delete(self._cookie_name)
+        if AuthService._get_cookie_manager().get(self._cookie_name):
+            AuthService._get_cookie_manager().delete(self._cookie_name)
         
         self._set_user(None)
 
@@ -207,7 +217,7 @@ class AppController:
     @classmethod
     def connect(cls) -> "AppController":
         session_key = f"AppController"
-        return get_session_state_singleton(session_key, cls())
+        return get_session_state_singleton(session_key, lambda: cls())
     
     def is_comp_setup(self) -> bool:
         return self.db is not None
@@ -261,7 +271,7 @@ class Register:
     @classmethod
     def connect(cls) -> "Register":
         session_key = f"Register"
-        return get_session_state_singleton(session_key, cls())
+        return get_session_state_singleton(session_key, lambda: cls())
     
     def create_judge_user(self, user_name: str, password: str):
         try:
@@ -304,10 +314,10 @@ class CompScoreSheetAi:
     @classmethod
     def connect(cls) -> "CompScoreSheetAi":
         session_key = f"CompScoreSheetAi"
-        return get_session_state_singleton(session_key, cls())
+        return get_session_state_singleton(session_key, lambda: cls())
     
     def get_score_sheet_singleton(self) -> dm.ScoreSheet:
-        return get_session_state_singleton("current_score_sheet", None)
+        return get_session_state_singleton("current_score_sheet", lambda: None)
 
     def get_scoring_using_ai(self, image: Image):
         try:

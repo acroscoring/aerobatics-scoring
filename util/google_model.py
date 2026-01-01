@@ -103,7 +103,7 @@ class SheetDB:
     @classmethod
     def connect(cls, sheet_id: str) -> "SheetDB":
         session_key = f"SheetDB_{sheet_id}"
-        return controller.get_session_state_singleton(session_key, cls(sheet_id))
+        return controller.get_session_state_singleton(session_key, lambda: cls(sheet_id))
     
     @classmethod
     def create(cls, comp_name: str, admin_email: str) -> "SheetDB":
