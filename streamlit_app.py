@@ -7,36 +7,23 @@ pages = [
     st.Page("pages/admin.py", title="Admin",icon="⚙️")
 ]
 
-app_ctrl = AppController()
+app_ctrl = AppController.connect()
 if app_ctrl.is_user_logged_in() :
     pages.append(st.Page("pages/comp.py", title="Competition",icon="🏆"))
     
     with st.sidebar:
+        assert app_ctrl.db is not None
+        st.write(app_ctrl.db.title)
         assert app_ctrl.auth_user is not None
         user = app_ctrl.auth_user
-        st.caption(f"{user.role}({user.id}): {user.username}")
-        if st.button("Logout"):
+        st.caption(f"{user.role} ({user.id}): {user.username}")
+        if st.button("Logout", key="app_logout_bt"):
             app_ctrl.logout()
 
 elif app_ctrl.is_comp_setup():
-    tab_login, tab_forgot = st.tabs(["Login", "Forgot Password"])
-    
-    with tab_login:
-        st.header("🔐 Login")
-        email: str = st.text_input("Email", icon="📧")
-        password: str = st.text_input("Password", type="password", icon="🔐")
-        if st.button("Log In", type="primary"):
-            assert app_ctrl.db is not None
-            app_ctrl.login(email, password)
-        
-    with tab_forgot:
-        st.header("🤔 Reset Password")
-        email: str = st.text_input("Email", icon="📧")
-        if st.button("Send Temporary Password", type="primary"):
-            app_ctrl.forgot_password(email)
-
+    pages.append(st.Page("pages/login.py", title="Login",icon="🔐"))
 else:
-    st.header("Hi!")
+    pass
 
 page = st.navigation(pages)
 page.run()

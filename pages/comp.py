@@ -6,15 +6,15 @@ import pandas as pd
 st.set_page_config(page_title="Competition", page_icon="🏆", layout="wide")
 st.title("🏆 Competition Scoring")
 
-controller = CompScoreSheetAi()
-st.header(controller.get_comp_title())
+ctrl = CompScoreSheetAi.connect()
+st.header(ctrl.db.title)
 
 st.markdown("### 📸 Capture Score Sheet")
 st.divider()
 
-current_score_sheet = controller.get_score_sheet_singleton()
+current_score_sheet = ctrl.get_score_sheet_singleton()
 if not current_score_sheet:
-    input_method = st.radio("Input method:", ["Upload Image", "Use Camera"], horizontal=True)
+    input_method = st.radio("Input method:", ["Upload Image", "Use Camera"], horizontal=True, key="method_rd")
     img_file = st.camera_input("Take a picture", key="widget_camera") if input_method == "Use Camera" else st.file_uploader("Choose file", type=["jpg", "jpeg", "png", "heic", "heif", "webp"], key="widget_uploader")
 
     if img_file:
@@ -25,13 +25,12 @@ if not current_score_sheet:
             st.image(image, caption="Image uploaded, looks correct?")
 
         with st.spinner("AI is analyzing the image...", show_time=True):
-            controller.get_scoring_using_ai(image)
-            st.rerun() # Force a refresh to show the edit form immediately
+            ctrl.get_scoring_using_ai(image)
+            st.rerun()
 
 else:
     st.subheader("📝 Verify & Edit Data")
 
-    # Editable Metadata (Columns for better layout)
     col1, col2, col3 = st.columns(3)
     with col1:
         pilot_id = st.number_input("Pilot ID", value=current_score_sheet.pilot_id, min_value=0, step=1)
@@ -57,9 +56,9 @@ else:
         key="editor_changes" # Unique key
     )
 
-    if st.button("Submit Verified Scores", type="primary", icon="✅"):
-        controller.save_scoring_sheet_data_to_db(pilot_id=pilot_id, flight_num=flight_num, judge_id=judge_id, df=edited_df)
+    if st.button("Submit Verified Scores", type="primary", icon="✅", key="save_score_bt"):
+        ctrl.save_scoring_sheet_data_to_db(pilot_id=pilot_id, flight_num=flight_num, judge_id=judge_id, df=edited_df)
         
-    if st.button("Reset", type="secondary", icon="⏪", help="Clear all back to the start"):
-        controller.reset_comp_ai_ui()
+    if st.button("Reset", type="secondary", icon="⏪", help="Clear all back to the start", key="reset_bt"):
+        ctrl.reset_comp_ai_ui()
         st.rerun()

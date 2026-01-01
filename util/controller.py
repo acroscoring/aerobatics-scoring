@@ -89,7 +89,7 @@ class CompDB:
         return _get_session_state("comp_id")
 
     @staticmethod
-    def _delete_id_session_state():
+    def delete_id_session_state():
         _delete_session_state("comp_id")
 
     @staticmethod
@@ -140,6 +140,11 @@ class AuthService:
             
         self._set_user(auth_user)
 
+    @classmethod
+    def connect(cls) -> "AuthService":
+        session_key = f"AuthService"
+        return get_session_state_singleton(session_key, cls())
+    
     def _set_user(self, auth_user: dm.AuthUser | None):
         _set_session_state("auth_user", auth_user)
         self.user = auth_user
@@ -171,7 +176,6 @@ class AuthService:
             self._cookie_manager.delete(self._cookie_name)
         
         self._set_user(None)
-        st.rerun()
 
 # --------------------------------------------------------------------------------------------------------------
 # Auth
@@ -179,7 +183,7 @@ class AuthService:
 
 class AppController:
     def __init__(self):
-        self._auth = AuthService()
+        self._auth = AuthService.connect()
         self.auth_user = None
         comp_id_from_auth = None
         if self._auth.user:
@@ -194,10 +198,16 @@ class AppController:
 
         comp_id = comp_id_from_db if comp_id_from_db else comp_id_from_auth
         
+        self._comp_db = CompDB.connect(comp_id) if comp_id else None
         self.db = CompDB.connect(comp_id).db if comp_id else None
 
         if (comp_id is None) or (comp_id != comp_id_from_auth):
             self._auth.logout()
+    
+    @classmethod
+    def connect(cls) -> "AppController":
+        session_key = f"AppController"
+        return get_session_state_singleton(session_key, cls())
     
     def is_comp_setup(self) -> bool:
         return self.db is not None
@@ -219,6 +229,9 @@ class AppController:
         
     def logout(self):
         self._auth.logout()
+        if self._comp_db:
+            self._comp_db.delete_id_session_state()
+        st.rerun()
         
 # --------------------------------------------------------------------------------------------------------------
 # Judge
@@ -227,7 +240,7 @@ class AppController:
 class Register:
     def __init__(self):
         try:
-            self.app_ctrl = AppController()
+            self.app_ctrl = AppController.connect()
 
             if self.app_ctrl.is_comp_setup():
                 assert self.app_ctrl.db is not None
@@ -238,13 +251,18 @@ class Register:
             if self.app_ctrl.is_user_logged_in():
                 raise Exception(f"Logout to register a new user.")
             else:
-                self.auth = self.app_ctrl._auth
+                self.auth_user = self.app_ctrl.auth_user
 
             judge_id = Register._get_judge_id_from_query_params()
             self.judge_details = self.db.get_judge_details(judge_id)
         except Exception as e:
             _error_and_stop(e)
 
+    @classmethod
+    def connect(cls) -> "Register":
+        session_key = f"Register"
+        return get_session_state_singleton(session_key, cls())
+    
     def create_judge_user(self, user_name: str, password: str):
         try:
             user = dm.User.create(user_name, self.judge_details.email, password, "judge", self.judge_details.id)
@@ -268,7 +286,7 @@ class Register:
 class CompScoreSheetAi:
     def __init__(self):
         try:
-            self.app_ctrl = AppController()
+            self.app_ctrl = AppController.connect()
 
             if self.app_ctrl.is_comp_setup():
                 assert self.app_ctrl.db is not None
@@ -279,9 +297,14 @@ class CompScoreSheetAi:
             if not self.app_ctrl.is_user_logged_in():
                 raise Exception(f"Login to scan add a score sheet.")
             else:
-                self.auth = self.app_ctrl._auth
+                self.auth_user = self.app_ctrl.auth_user
         except Exception as e:
             _error_and_stop(e)
+    
+    @classmethod
+    def connect(cls) -> "CompScoreSheetAi":
+        session_key = f"CompScoreSheetAi"
+        return get_session_state_singleton(session_key, cls())
     
     def get_score_sheet_singleton(self) -> dm.ScoreSheet:
         return get_session_state_singleton("current_score_sheet", None)
