@@ -1,23 +1,24 @@
 import streamlit as st
-from util.controller import AuthService
+from util.controller import AppController
 
 pages = [
     st.Page("pages/home.py", title="Home", icon="✈️"),
     st.Page("pages/read_me.py", title="Read Me",icon="📖"),
     st.Page("pages/admin.py", title="Admin",icon="⚙️")
 ]
-page = st.navigation(pages)
-page.run()
 
-auth = AuthService()
-if auth.auth_user:
+app_ctrl = AppController()
+if app_ctrl.is_user_logged_in() :
     pages.append(st.Page("pages/comp.py", title="Competition",icon="🏆"))
     
     with st.sidebar:
-        st.caption(f"{auth.auth_user.role}({auth.auth_user.id}): {auth.auth_user.username}")
+        assert app_ctrl.auth_user is not None
+        user = app_ctrl.auth_user
+        st.caption(f"{user.role}({user.id}): {user.username}")
         if st.button("Logout"):
-            auth.logout()
-else:
+            app_ctrl.logout()
+
+elif app_ctrl.is_comp_setup():
     tab_login, tab_forgot = st.tabs(["Login", "Forgot Password"])
     
     with tab_login:
@@ -25,19 +26,17 @@ else:
         email: str = st.text_input("Email", icon="📧")
         password: str = st.text_input("Password", type="password", icon="🔐")
         if st.button("Log In", type="primary"):
-            auth.login(email, password)
+            assert app_ctrl.db is not None
+            app_ctrl.login(email, password)
         
     with tab_forgot:
-        st.header("Reset Password")
+        st.header("🤔 Reset Password")
         email: str = st.text_input("Email", icon="📧")
         if st.button("Send Temporary Password", type="primary"):
-            auth.forgot_password(email)
+            app_ctrl.forgot_password(email)
 
-
-
-
-#with st.sidebar:
-#    st.write(st.session_state)
+else:
+    st.header("Hi!")
 
 page = st.navigation(pages)
 page.run()

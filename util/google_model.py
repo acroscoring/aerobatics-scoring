@@ -7,7 +7,7 @@ from pydantic import BaseModel, EmailStr, HttpUrl
 from google import genai
 from PIL import Image
 import util.controller as controller
-import util.scoring_model as sm
+import util.data_model as dm
 import util.security_model as sec
 
 # --------------------------------------------------------------------------------------------------------------
@@ -70,60 +70,7 @@ def _get_genai_client(api_key: str):
 
 # --------------------------------------------------------------------------------------------------------------
 
-def create_competition_sheet_db(comp_name: str, admin_email: str) -> str:
-    try:
-        if not context.url:
-            raise Exception(f"Error getting context URL.")
 
-        payload = CreateCompetition(
-            comp_name = comp_name,
-            admin_email = admin_email,
-            bot_email = secrets["gcp_service_account"]["client_email"],
-            app_url = HttpUrl(context.url), # no query parameters
-            api_secret = secrets["google_app_script"]["api_secret"]
-        )
-        
-        api_url: str = secrets["google_app_script"]["prod_url"] if secrets["env"]["type"] == "prod" else secrets["google_app_script"]["dev_url"]
-        response = requests.post(api_url, json=payload.model_dump(mode='json'))
-        
-        if response.status_code != 200:
-            raise DatabaseConnectionError(f"HTTP Error: {response.status_code} - {response.text}")
-    
-        result = CreateCompetitionResponse(**response.json())
-        
-        if result.status != "Success":
-            raise DatabaseConnectionError(f"Create Competition Apps Script Error: {result.message}")
-        
-        if not result.sheet_id:
-            raise DatabaseConnectionError(f"Sheet (DB) ID Error")
-        
-        return result.sheet_id
-    except KeyError as e:
-        raise DatabaseConnectionError(f"Missing API URL Secret Configuration: {e}")
-    except Exception as e:
-        raise DatabaseConnectionError(f"Failed to create competition sheet (DB): {e}")
-
-def get_scoring_sheet_data_using_ai(image: Image.Image) -> sm.ScoreSheet:
-    try:
-        api_key: str = secrets["google_gemini"]["api_key"]
-        genai_client = _get_genai_client(api_key)
-        prompt = "Extract the data from this aerobatics score sheet. Return 0 for missing values."
-        response = genai_client.models.generate_content(
-            model=secrets["google_gemini"]["model"],
-            contents=[
-                image,  # Image 1st
-                prompt  # Prompt 2nd as per Google best practice https://ai.google.dev/gemini-api/docs/image-understanding#tips-best-practices
-            ],
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": sm.ScoreSheet,
-            },
-        )
-        return cast(sm.ScoreSheet, response.parsed)
-    except KeyError as e:
-        raise Exception(f"Missing AI Secret Configuration: {e}")
-    except Exception as e:
-        raise Exception(f"AI getting score error: {e}")
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -138,7 +85,7 @@ class SheetDB:
             if not self._sheet:
                 raise DatabaseConnectionError(f"Competition not found ({sheet_id})")
 
-            self.sheet_title = self._sheet.title
+            self.title = self._sheet.title
             self._users_ws = self._sheet.worksheet("Users")
             self._users_headers = self._users_ws.row_values(1)
             if not self._users_headers:
@@ -149,7 +96,7 @@ class SheetDB:
             if not self._judges_headers:
                 raise DatabaseConnectionError("Judges tab headers row missing")
 
-            self.sheet_id = sheet_id
+            self.id = sheet_id
         except Exception as e:
             raise DatabaseConnectionError(f"Error getting sheet (DB) details: {e}")
     
@@ -158,15 +105,49 @@ class SheetDB:
         session_key = f"SheetDB_{sheet_id}"
         return controller.get_session_state_singleton(session_key, cls(sheet_id))
     
-    def get_all_users(self) -> List[sm.User]:
+    @classmethod
+    def create(cls, comp_name: str, admin_email: str) -> "SheetDB":
+        try:
+            if not context.url:
+                raise Exception(f"Error getting context URL.")
+
+            payload = CreateCompetition(
+                comp_name = comp_name,
+                admin_email = admin_email,
+                bot_email = secrets["gcp_service_account"]["client_email"],
+                app_url = HttpUrl(context.url), # no query parameters
+                api_secret = secrets["google_app_script"]["api_secret"]
+            )
+            
+            api_url: str = secrets["google_app_script"]["prod_url"] if secrets["env"]["type"] == "prod" else secrets["google_app_script"]["dev_url"]
+            response = requests.post(api_url, json=payload.model_dump(mode='json'))
+            
+            if response.status_code != 200:
+                raise DatabaseConnectionError(f"HTTP Error: {response.status_code} - {response.text}")
+        
+            result = CreateCompetitionResponse(**response.json())
+            
+            if result.status != "Success":
+                raise DatabaseConnectionError(f"Create Competition Apps Script Error: {result.message}")
+            
+            if not result.sheet_id:
+                raise DatabaseConnectionError(f"Sheet (DB) ID Error")
+            
+            return SheetDB.connect(result.sheet_id)
+        except KeyError as e:
+            raise DatabaseConnectionError(f"Missing API URL Secret Configuration: {e}")
+        except Exception as e:
+            raise DatabaseConnectionError(f"Failed to create competition sheet (DB): {e}")
+    
+    def get_all_users(self) -> List[dm.User]:
         try:
             records = self._users_ws.get_all_records()
-            users = [sm.User.from_sheet_record(r) for r in records]
+            users = [dm.User.from_sheet_record(r) for r in records]
             return users
         except Exception as e:
             raise Exception(f"Error fetching users: {e}")
     
-    def get_user_by_email(self, email: str) -> sm.User:
+    def get_user_by_email(self, email: str) -> dm.User:
         email = email.lower().strip()
         users = self.get_all_users()
         user = next((u for u in users if u.email == email), None)
@@ -175,7 +156,7 @@ class SheetDB:
 
         raise UserEmailNotFound(f"User {email} not found in sheet (DB)")
 
-    def register_user(self, user: sm.User):
+    def register_user(self, user: dm.User):
         try:
             self.get_user_by_email(user.email)
             raise UserAlreadyExistsError(f"Email {user.email} already exists.")
@@ -186,7 +167,7 @@ class SheetDB:
             except Exception as e:
                 raise Exception(f"Register user error: {e}")
 
-    def authenticate_user(self, email: str, password: str) -> sm.User:
+    def authenticate_user(self, email: str, password: str) -> dm.User:
         try:
             user = self.get_user_by_email(email)
             if user and sec.verify_password(password, user.password):
@@ -210,19 +191,19 @@ class SheetDB:
         except Exception as e:
             raise Exception(f"Password update error: {e}")
     
-    def save_scoring_sheet_data(self, score_data: sm.ScoreSheet):
+    def save_scoring_sheet_data(self, score_data: dm.ScoreSheet):
         #to do
         pass    
 
-    def get_all_judges(self) -> List[sm.Judge]:
+    def get_all_judges(self) -> List[dm.Judge]:
         try:
-            records = self._judges_ws.get_all_records(numericise_ignore=['all'])
-            judges = [sm.Judge.from_sheet_record(r) for r in records]
+            records = self._judges_ws.get_all_records()
+            judges = [dm.Judge.from_sheet_record(r) for r in records]
             return judges
         except Exception as e:
             raise Exception(f"Error fetching judges: {e}")
 
-    def get_judge_details(self, judge_id: str) -> sm.Judge:
+    def get_judge_details(self, judge_id: int) -> dm.Judge:
         all_judges = self.get_all_judges()    
         judge = next((j for j in all_judges if j.id == judge_id), None)
 
@@ -230,3 +211,25 @@ class SheetDB:
             raise Exception(f"Judge with ID {judge_id} not found in sheet (DB)")
 
         return judge
+    
+    def get_scoring_sheet_data_using_ai(self, image: Image.Image) -> dm.ScoreSheet:
+        try:
+            api_key: str = secrets["google_gemini"]["api_key"]
+            genai_client = _get_genai_client(api_key)
+            prompt = "Extract the data from this aerobatics score sheet. Return 0 for missing values."
+            response = genai_client.models.generate_content(
+                model=secrets["google_gemini"]["model"],
+                contents=[
+                    image,  # Image 1st
+                    prompt  # Prompt 2nd as per Google best practice https://ai.google.dev/gemini-api/docs/image-understanding#tips-best-practices
+                ],
+                config={
+                    "response_mime_type": "application/json",
+                    "response_schema": dm.ScoreSheet,
+                },
+            )
+            return cast(dm.ScoreSheet, response.parsed)
+        except KeyError as e:
+            raise Exception(f"Missing AI Secret Configuration: {e}")
+        except Exception as e:
+            raise Exception(f"AI getting score error: {e}")

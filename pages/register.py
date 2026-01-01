@@ -1,10 +1,10 @@
 import streamlit as st
-from util.controller import RegisterNewJudge
+from util.controller import Register
 
 st.set_page_config(page_title="Registration", page_icon="📝", layout="wide")
 st.title("📝 Create Judge User to Upload Scores")
 
-controller = RegisterNewJudge()
+controller = Register()
 st.header(controller.get_comp_title())
 
 st.subheader(f"Welcome {controller.judge_details.name}!")
