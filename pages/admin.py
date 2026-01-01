@@ -1,5 +1,5 @@
 import streamlit as st
-from util.controller import AppController, CompDB
+from util.controller import AppController
 
 st.set_page_config(page_title="Admin", page_icon="⚙️", layout="wide")
 st.title("⚙️ Administration")
@@ -16,7 +16,7 @@ elif app_ctrl.is_comp_setup():
     st.write("Login to manage the current competition or create a new competition")
     if st.button("Create New Comp", type="primary", key="create_new_comp_bt"):
         assert app_ctrl.db is not None
-        app_ctrl.logout()
+        app_ctrl.logout_user()
 
 else:
     st.header("Create a new competition")
@@ -30,10 +30,8 @@ else:
 
         if submitted:
             with st.spinner("Creating competition...", show_time=True):
-                CompDB.create(comp_name=comp_name, user_name=user_name, admin_email=admin_email, password=password)
+                app_ctrl.create_new_comp(comp_name=comp_name, user_name=user_name, admin_email=admin_email, password=password)
+                st.success(f"Competition created successfully and an email was sent to you {user_name}!", icon="✅")
                 app_ctrl.login(admin_email, password)
-                st.success(f"Competition created successfully and an email was sent to you {user_name}!", icon="✅")    
-                
-
-
+                  
         

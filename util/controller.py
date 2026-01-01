@@ -72,7 +72,7 @@ class CompDB:
     @classmethod
     def create(cls, comp_name: str, user_name: str, admin_email: str, password: str) -> "CompDB":
         try:
-            user = dm.User.create(user_name, admin_email, password, "admin", None)
+            user = dm.User.create(user_name, admin_email, password, "admin", "")
             db = gm.SheetDB.create(comp_name=comp_name, admin_email=admin_email)
             db.register_user(user)
             return CompDB.connect(db.id)
@@ -126,48 +126,44 @@ class CompDB:
 # Auth
 # --------------------------------------------------------------------------------------------------------------
 
+cookie_manager = stx.CookieManager("main_cookie_manage") #get_session_state_singleton("cookie_manager", lambda: stx.CookieManager("main_cookie_manage"))
+cookie_manager.get_all(key="all_cookies")
+
 class AuthService:
-    def __init__(self, auth_user: dm.AuthUser | None):
-        self._set_user(auth_user)
+    def __init__(self):
+        self._cookie_manager = cookie_manager #get_session_state_singleton("cookie_manager", lambda: stx.CookieManager("main_cookie_manage"))
         self._cookie_name = "aeroscore_auth_token"
 
+        auth_user = _get_session_state("auth_user")
+        if not auth_user:
+            #token = get_session_state_singleton("auth_cookie", lambda: self._cookie_manager.get_all(key="all_cookies").get(self._cookie_name))
+            token = cookie_manager.get(self._cookie_name)
+            st.write(f"token: {token}")
+            if token:
+                auth_user = sec.decode_token(token)
+                st.write(f"auth_user: {auth_user}")
 
+        self._set_user(auth_user)
+        
     @classmethod
     def connect(cls) -> "AuthService":
-        auth_user = AuthService._get_auth_user()
-        session_key = f"AuthService"
-        return get_session_state_singleton(session_key, lambda: cls(auth_user))
+        #session_key = f"AuthService"
+        #return get_session_state_singleton(session_key, lambda: cls())
+        return cls()
     
     def _set_user(self, auth_user: dm.AuthUser | None):
         _set_session_state("auth_user", auth_user)
         self.user = auth_user
-
-    @staticmethod
-    def _get_cookie_manager():
-        return get_session_state_singleton("cookie_manager", lambda: stx.CookieManager("main_cookie_manage"))
-
-    @staticmethod
-    def _get_auth_user() -> dm.AuthUser | None:
-        auth_user = _get_session_state("auth_user")
-        if auth_user is None:
-            cookie_manager = AuthService._get_cookie_manager()
-            cookies = cookie_manager.get_all()
-            token = cookies.get("aeroscore_auth_token")
-            if token:
-                auth_user = sec.decode_token(token)
-                if auth_user:
-                    _set_session_state("auth_user", auth_user)
-        return auth_user
-
+        
     def login(self, db: gm.SheetDB, email: str, password: str):
         try:
             user = db.authenticate_user(email=email, password=password)
             auth_user = dm.AuthUser.from_user(user=user, comp_id=db.id)
             token = sec.create_token(auth_user)
-            AuthService._get_cookie_manager().set(self._cookie_name, token, sec.get_token_expire())
+            
+            self._cookie_manager.set(self._cookie_name, token, expires_at=sec.get_token_expire())
+            _delete_session_state("auth_cookie")
             self._set_user(auth_user)
-            st.toast(f"Logged in {auth_user.username}! Reloading...")
-            st.rerun()
         except Exception as e:
             _error_and_stop(e)
 
@@ -176,15 +172,17 @@ class AuthService:
             db.get_user_by_email(email)    
             temp_pass = str(uuid.uuid4())[:6]
             db.update_user_password(email, temp_pass)
+            self.logout()
             # Send email with new password
             st.toast("Check your email for the temporary password.")
         except Exception as e:
             _error_and_stop(e)
 
     def logout(self):
-        if AuthService._get_cookie_manager().get(self._cookie_name):
-            AuthService._get_cookie_manager().delete(self._cookie_name)
+        if self._cookie_manager.get(self._cookie_name):
+            self._cookie_manager.delete(self._cookie_name, key="delete_cookie")
         
+        _delete_session_state("auth_cookie")
         self._set_user(None)
 
 # --------------------------------------------------------------------------------------------------------------
@@ -207,17 +205,18 @@ class AppController:
             pass
 
         comp_id = comp_id_from_db if comp_id_from_db else comp_id_from_auth
-        
         self._comp_db = CompDB.connect(comp_id) if comp_id else None
         self.db = CompDB.connect(comp_id).db if comp_id else None
 
         if (comp_id is None) or (comp_id != comp_id_from_auth):
             self._auth.logout()
+            self.auth_user = None
     
     @classmethod
     def connect(cls) -> "AppController":
-        session_key = f"AppController"
-        return get_session_state_singleton(session_key, lambda: cls())
+        #session_key = f"AppController"
+        #return get_session_state_singleton(session_key, lambda: cls())
+        return cls()
     
     def is_comp_setup(self) -> bool:
         return self.db is not None
@@ -225,9 +224,17 @@ class AppController:
     def is_user_logged_in(self) -> bool:
         return self.auth_user is not None
     
+    def create_new_comp(self, comp_name: str, user_name: str, admin_email: str, password: str):
+        self._comp_db = CompDB.create(comp_name=comp_name, user_name=user_name, admin_email=admin_email, password=password)
+        self.db = self._comp_db.db
+    
     def login(self, email: str, password: str):
         if self.db:
             self._auth.login(self.db, email, password)
+            self.auth_user = self._auth.user
+            assert self.auth_user is not None
+            st.toast(f"Logged in {self.auth_user.username}! Reloading...")
+            st.rerun()
         else:
             raise Exception("Competition not set up for login!")
 
@@ -237,11 +244,18 @@ class AppController:
         else:
             raise Exception("Competition not set up for forgot password!")
         
-    def logout(self):
+    def logout_user(self):
         self._auth.logout()
+        self.auth_user = None
+        st.rerun()
+    
+    def logout_comp(self):
         if self._comp_db:
             self._comp_db.delete_id_session_state()
-        st.rerun()
+        self._comp_db = None
+        self.db = None
+        self.logout_user()
+
         
 # --------------------------------------------------------------------------------------------------------------
 # Judge

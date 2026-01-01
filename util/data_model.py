@@ -20,7 +20,7 @@ class UserBase(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     email: EmailStr
     role: RoleType
-    id: int | None
+    id: int | Literal[""]
 
     @field_validator('email')
     @classmethod
@@ -37,6 +37,8 @@ class User(UserBase):
     @field_validator('password')
     @classmethod
     def hash_password(cls, password: str) -> str:
+        if len(password) == 60 and password.startswith(("$2b$", "$2a$", "$2y$")):
+            return password
         return sec.hash_password(password)
     
     @classmethod
@@ -44,7 +46,7 @@ class User(UserBase):
         return cls(**record)
     
     @classmethod
-    def create(cls, username: str, email: str, password: str, role: RoleType, id: int | None) -> "User":
+    def create(cls, username: str, email: str, password: str, role: RoleType, id: int | Literal[""] = "") -> "User":
         try:
             user = User(
                 username=username,
