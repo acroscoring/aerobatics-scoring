@@ -1,8 +1,11 @@
 import streamlit as st
 from util.controller import AppController
+from pages.sidebar import load_sidebar
 
 st.set_page_config(page_title="Admin", page_icon="⚙️", layout="wide")
 st.title("⚙️ Administration")
+
+load_sidebar()
 
 app_ctrl = AppController.connect()
 if app_ctrl.is_user_logged_in():

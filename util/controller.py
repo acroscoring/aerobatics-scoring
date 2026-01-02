@@ -1,11 +1,12 @@
 import streamlit as st
-from typing import Any, List, Dict, cast, Callable
+from typing import Any, List, Dict, cast
 import util.google_model as gm
 import util.data_model as dm
 import util.security_model as sec
+import util.streamlit_model as sm
 from PIL.Image import Image
 from pandas import DataFrame
-import extra_streamlit_components as stx # type: ignore
+from streamlit_cookies_manager import EncryptedCookieManager # type: ignore
 import uuid
 
 # --------------------------------------------------------------------------------------------------------------
@@ -15,27 +16,6 @@ class MissingCompId(Exception):
 
 class MissingJudgeId(Exception):
     pass
-
-# --------------------------------------------------------------------------------------------------------------
-# Session State
-# --------------------------------------------------------------------------------------------------------------
-
-def _get_session_state(name: str) -> Any:
-    return st.session_state.get(name, None)
-
-def _set_session_state(name: str, value: Any) -> Any:
-    st.session_state[name] = value
-    return _get_session_state(name)
-
-def _delete_session_state(name: str):
-    if name in st.session_state:
-        del st.session_state[name]
-
-def get_session_state_singleton(name: str, call_lambda: Callable[[], Any]) -> Any:
-    if name not in st.session_state:
-        _set_session_state(name, call_lambda())
-    
-    return _get_session_state(name)
 
 # --------------------------------------------------------------------------------------------------------------
 # UI
@@ -58,7 +38,7 @@ class CompDB:
     @classmethod
     def connect(cls, sheet_id: str) -> "CompDB":
         session_key = f"CompDB_{sheet_id}"
-        return get_session_state_singleton(session_key, lambda: cls(sheet_id))
+        return sm.get_session_state_singleton(session_key, lambda: cls(sheet_id))
 
     @classmethod
     def connect_or_stop(cls) -> "CompDB":
@@ -82,15 +62,15 @@ class CompDB:
 
     @staticmethod
     def _set_id_session_state(sheet_id: str) -> str:
-        return _set_session_state("comp_id", sheet_id)
+        return sm.set_session_state("comp_id", sheet_id)
 
     @staticmethod
     def _get_id_session_state() -> str:
-        return _get_session_state("comp_id")
+        return sm.get_session_state("comp_id")
 
     @staticmethod
     def delete_id_session_state():
-        _delete_session_state("comp_id")
+        sm.delete_session_state("comp_id")
 
     @staticmethod
     def _get_id_from_query_params() -> str:
@@ -126,18 +106,21 @@ class CompDB:
 # Auth
 # --------------------------------------------------------------------------------------------------------------
 
-cookie_manager = stx.CookieManager("main_cookie_manage") #get_session_state_singleton("cookie_manager", lambda: stx.CookieManager("main_cookie_manage"))
-cookie_manager.get_all(key="all_cookies")
-
 class AuthService:
     def __init__(self):
-        self._cookie_manager = cookie_manager #get_session_state_singleton("cookie_manager", lambda: stx.CookieManager("main_cookie_manage"))
-        self._cookie_name = "aeroscore_auth_token"
+        self.refresh()
 
-        auth_user = _get_session_state("auth_user")
+    def refresh(self):
+        cookies = EncryptedCookieManager(prefix="aeroscoring/", password=st.secrets.auth.cookie_password)
+        if not cookies.ready():
+            st.stop()
+
+        self._cookies = cookies
+        self._cookie_name = "auth_token"
+
+        auth_user = sm.get_session_state("auth_user")
         if not auth_user:
-            #token = get_session_state_singleton("auth_cookie", lambda: self._cookie_manager.get_all(key="all_cookies").get(self._cookie_name))
-            token = cookie_manager.get(self._cookie_name)
+            token = cookies.get(self._cookie_name)
             st.write(f"token: {token}")
             if token:
                 auth_user = sec.decode_token(token)
@@ -147,12 +130,11 @@ class AuthService:
         
     @classmethod
     def connect(cls) -> "AuthService":
-        #session_key = f"AuthService"
-        #return get_session_state_singleton(session_key, lambda: cls())
-        return cls()
+        session_key = f"AuthService"
+        return sm.get_session_state_singleton(session_key, lambda: cls())
     
     def _set_user(self, auth_user: dm.AuthUser | None):
-        _set_session_state("auth_user", auth_user)
+        sm.set_session_state("auth_user", auth_user)
         self.user = auth_user
         
     def login(self, db: gm.SheetDB, email: str, password: str):
@@ -160,9 +142,9 @@ class AuthService:
             user = db.authenticate_user(email=email, password=password)
             auth_user = dm.AuthUser.from_user(user=user, comp_id=db.id)
             token = sec.create_token(auth_user)
-            
-            self._cookie_manager.set(self._cookie_name, token, expires_at=sec.get_token_expire())
-            _delete_session_state("auth_cookie")
+            st.write(f"new token: {token}")
+            self._cookies[self._cookie_name] = token
+            self._cookies.save()
             self._set_user(auth_user)
         except Exception as e:
             _error_and_stop(e)
@@ -179,10 +161,7 @@ class AuthService:
             _error_and_stop(e)
 
     def logout(self):
-        if self._cookie_manager.get(self._cookie_name):
-            self._cookie_manager.delete(self._cookie_name, key="delete_cookie")
-        
-        _delete_session_state("auth_cookie")
+        del self._cookies[self._cookie_name]
         self._set_user(None)
 
 # --------------------------------------------------------------------------------------------------------------
@@ -214,9 +193,8 @@ class AppController:
     
     @classmethod
     def connect(cls) -> "AppController":
-        #session_key = f"AppController"
-        #return get_session_state_singleton(session_key, lambda: cls())
-        return cls()
+        session_key = f"AppController"
+        return sm.get_session_state_singleton(session_key, lambda: cls())
     
     def is_comp_setup(self) -> bool:
         return self.db is not None
@@ -255,6 +233,9 @@ class AppController:
         self._comp_db = None
         self.db = None
         self.logout_user()
+    
+    def refresh_auth(self):
+        self._auth.refresh()
 
         
 # --------------------------------------------------------------------------------------------------------------
@@ -285,7 +266,7 @@ class Register:
     @classmethod
     def connect(cls) -> "Register":
         session_key = f"Register"
-        return get_session_state_singleton(session_key, lambda: cls())
+        return sm.get_session_state_singleton(session_key, lambda: cls())
     
     def create_judge_user(self, user_name: str, password: str):
         try:
@@ -328,16 +309,16 @@ class CompScoreSheetAi:
     @classmethod
     def connect(cls) -> "CompScoreSheetAi":
         session_key = f"CompScoreSheetAi"
-        return get_session_state_singleton(session_key, lambda: cls())
+        return sm.get_session_state_singleton(session_key, lambda: cls())
     
     def get_score_sheet_singleton(self) -> dm.ScoreSheet:
-        return get_session_state_singleton("current_score_sheet", lambda: None)
+        return sm.get_session_state_singleton("current_score_sheet", lambda: None)
 
     def get_scoring_using_ai(self, image: Image):
         try:
             new_score_sheet = self.db.get_scoring_sheet_data_using_ai(image)
             if new_score_sheet:
-                _set_session_state("current_score_sheet", new_score_sheet)
+                sm.set_session_state("current_score_sheet", new_score_sheet)
             else:
                 raise Exception("AI didn't return any score sheet result.")
         except Exception as e:
@@ -361,9 +342,9 @@ class CompScoreSheetAi:
             _error_and_stop(e)
 
     def reset_comp_ai_ui(self):
-        _delete_session_state("current_score_sheet")
-        _delete_session_state("widget_uploader")
-        _delete_session_state("widget_camera")
+        sm.delete_session_state("current_score_sheet")
+        sm.delete_session_state("widget_uploader")
+        sm.delete_session_state("widget_camera")
 
 
 

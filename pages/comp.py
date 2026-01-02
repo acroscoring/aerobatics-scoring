@@ -2,9 +2,12 @@ import streamlit as st
 from util.controller import CompScoreSheetAi
 from PIL import Image
 import pandas as pd
+from pages.sidebar import load_sidebar
 
 st.set_page_config(page_title="Competition", page_icon="🏆", layout="wide")
 st.title("🏆 Competition Scoring")
+
+load_sidebar()
 
 ctrl = CompScoreSheetAi.connect()
 st.header(ctrl.db.title)

@@ -10,6 +10,6 @@ pillow
 pandas
 requests
 bcrypt
-extra-streamlit-components
+streamlit-cookies-manager-v2
 pyjwt
 cryptography

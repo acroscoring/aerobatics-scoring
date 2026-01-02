@@ -6,7 +6,7 @@ from typing import Optional, cast, Literal, Any, List
 from pydantic import BaseModel, EmailStr, HttpUrl
 from google import genai
 from PIL import Image
-import util.controller as controller
+from util.streamlit_model import get_session_state_singleton
 import util.data_model as dm
 import util.security_model as sec
 
@@ -103,7 +103,7 @@ class SheetDB:
     @classmethod
     def connect(cls, sheet_id: str) -> "SheetDB":
         session_key = f"SheetDB_{sheet_id}"
-        return controller.get_session_state_singleton(session_key, lambda: cls(sheet_id))
+        return get_session_state_singleton(session_key, lambda: cls(sheet_id))
     
     @classmethod
     def create(cls, comp_name: str, admin_email: str) -> "SheetDB":
