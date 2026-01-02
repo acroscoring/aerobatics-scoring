@@ -6,8 +6,8 @@ import util.security_model as sec
 import util.streamlit_model as sm
 from PIL.Image import Image
 from pandas import DataFrame
-from streamlit_cookies_manager import EncryptedCookieManager # type: ignore
 import uuid
+from streamlit_cookies_manager import EncryptedCookieManager # type: ignore
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -108,16 +108,10 @@ class CompDB:
 
 class AuthService:
     def __init__(self):
-        self.refresh()
-
-    def refresh(self):
-        cookies = EncryptedCookieManager(prefix="aeroscoring/", password=st.secrets.auth.cookie_password)
-        if not cookies.ready():
-            st.stop()
-
-        self._cookies = cookies
         self._cookie_name = "auth_token"
+        self.user = None
 
+    def refresh(self, cookies: EncryptedCookieManager):
         auth_user = sm.get_session_state("auth_user")
         if not auth_user:
             token = cookies.get(self._cookie_name)
@@ -125,51 +119,56 @@ class AuthService:
                 auth_user = sec.decode_token(token)
 
         self._set_user(auth_user)
-        
+
     @classmethod
     def connect(cls) -> "AuthService":
         session_key = f"AuthService"
-        auth_serv = sm.get_session_state_singleton(session_key, lambda: cls())
-        auth_serv.refresh()
-        return auth_serv
+        return sm.get_session_state_singleton(session_key, lambda: cls())
     
     def _set_user(self, auth_user: dm.AuthUser | None):
         sm.set_session_state("auth_user", auth_user)
         self.user = auth_user
         
-    def login(self, db: gm.SheetDB, email: str, password: str):
+    def login(self, cookies: EncryptedCookieManager, db: gm.SheetDB, email: str, password: str):
         try:
             user = db.authenticate_user(email=email, password=password)
             auth_user = dm.AuthUser.from_user(user=user, comp_id=db.id)
             token = sec.create_token(auth_user)
-            self._cookies[self._cookie_name] = token
-            self._cookies.save()
+            cookies[self._cookie_name] = token
+            cookies.save()
             self._set_user(auth_user)
         except Exception as e:
             _error_and_stop(e)
 
-    def forgot_password(self, db: gm.SheetDB, email: str):
+    def forgot_password(self, cookies: EncryptedCookieManager, db: gm.SheetDB, email: str):
         try:
             db.get_user_by_email(email)    
             temp_pass = str(uuid.uuid4())[:6]
             db.update_user_password(email, temp_pass)
-            self.logout()
+            self.logout(cookies)
             # Send email with new password
             st.toast("Check your email for the temporary password.")
         except Exception as e:
             _error_and_stop(e)
 
-    def logout(self):
-        del self._cookies[self._cookie_name]
+    def logout(self, cookies: EncryptedCookieManager):
+        del cookies[self._cookie_name]
+        cookies.save()
         self._set_user(None)
 
 # --------------------------------------------------------------------------------------------------------------
-# Auth
+# App Controller
 # --------------------------------------------------------------------------------------------------------------
 
 class AppController:
     def __init__(self):
         self._auth = AuthService.connect()
+        self.auth_user = None
+        self._comp_db = None
+        self.db = None
+
+    def refresh_auth(self, cookies: EncryptedCookieManager):
+        self._auth.refresh(cookies)
         self.auth_user = None
         comp_id_from_auth = None
         if self._auth.user:
@@ -187,14 +186,13 @@ class AppController:
         self.db = CompDB.connect(comp_id).db if comp_id else None
 
         if (comp_id is None) or (comp_id != comp_id_from_auth):
-            self._auth.logout()
+            self._auth.logout(cookies)
             self.auth_user = None
     
     @classmethod
     def connect(cls) -> "AppController":
         session_key = f"AppController"
         return sm.get_session_state_singleton(session_key, lambda: cls())
-        #return cls()
     
     def is_comp_setup(self) -> bool:
         return self.db is not None
@@ -206,38 +204,34 @@ class AppController:
         self._comp_db = CompDB.create(comp_name=comp_name, user_name=user_name, admin_email=admin_email, password=password)
         self.db = self._comp_db.db
     
-    def login(self, email: str, password: str):
+    def login(self, cookies: EncryptedCookieManager, email: str, password: str):
         if self.db:
-            self._auth.login(self.db, email, password)
+            self._auth.login(cookies, self.db, email, password)
             self.auth_user = self._auth.user
             assert self.auth_user is not None
-            st.toast(f"Logged in {self.auth_user.username}! Reloading...")
+            st.toast(f"Logged in {self.auth_user.username}!")
             st.rerun()
         else:
             raise Exception("Competition not set up for login!")
 
-    def forgot_password(self, email: str):
+    def forgot_password(self, cookies: EncryptedCookieManager, email: str):
         if self.db:
-            self._auth.forgot_password(self.db, email)
+            self._auth.forgot_password(cookies, self.db, email)
         else:
             raise Exception("Competition not set up for forgot password!")
         
-    def logout_user(self):
-        self._auth.logout()
+    def logout_user(self, cookies: EncryptedCookieManager):
+        self._auth.logout(cookies)
         self.auth_user = None
         st.rerun()
     
-    def logout_comp(self):
+    def logout_comp(self, cookies: EncryptedCookieManager):
         if self._comp_db:
             self._comp_db.delete_id_session_state()
         self._comp_db = None
         self.db = None
-        self.logout_user()
-    
-    def refresh_auth(self):
-        self._auth.refresh()
+        self.logout_user(cookies)
 
-        
 # --------------------------------------------------------------------------------------------------------------
 # Judge
 # --------------------------------------------------------------------------------------------------------------
