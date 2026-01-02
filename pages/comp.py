@@ -2,14 +2,10 @@ import streamlit as st
 from util.controller import CompScoreSheetAi
 from PIL import Image
 import pandas as pd
-from pages.sidebar import load_sidebar
+from pages.header import load
 
-st.set_page_config(page_title="Competition", page_icon="🏆", layout="wide")
-st.title("🏆 Competition Scoring")
-
-load_sidebar()
-
-ctrl = CompScoreSheetAi.connect()
+app_ctrl = load(page_title="Competition", page_icon="🏆", frame_title="🏆 Competition Scoring")
+ctrl = CompScoreSheetAi.connect(app_ctrl)
 st.header(ctrl.db.title)
 
 st.markdown("### 📸 Capture Score Sheet")

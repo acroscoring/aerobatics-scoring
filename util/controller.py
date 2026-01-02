@@ -121,17 +121,17 @@ class AuthService:
         auth_user = sm.get_session_state("auth_user")
         if not auth_user:
             token = cookies.get(self._cookie_name)
-            st.write(f"token: {token}")
             if token:
                 auth_user = sec.decode_token(token)
-                st.write(f"auth_user: {auth_user}")
 
         self._set_user(auth_user)
         
     @classmethod
     def connect(cls) -> "AuthService":
         session_key = f"AuthService"
-        return sm.get_session_state_singleton(session_key, lambda: cls())
+        auth_serv = sm.get_session_state_singleton(session_key, lambda: cls())
+        auth_serv.refresh()
+        return auth_serv
     
     def _set_user(self, auth_user: dm.AuthUser | None):
         sm.set_session_state("auth_user", auth_user)
@@ -142,7 +142,6 @@ class AuthService:
             user = db.authenticate_user(email=email, password=password)
             auth_user = dm.AuthUser.from_user(user=user, comp_id=db.id)
             token = sec.create_token(auth_user)
-            st.write(f"new token: {token}")
             self._cookies[self._cookie_name] = token
             self._cookies.save()
             self._set_user(auth_user)
@@ -195,6 +194,7 @@ class AppController:
     def connect(cls) -> "AppController":
         session_key = f"AppController"
         return sm.get_session_state_singleton(session_key, lambda: cls())
+        #return cls()
     
     def is_comp_setup(self) -> bool:
         return self.db is not None
@@ -243,9 +243,9 @@ class AppController:
 # --------------------------------------------------------------------------------------------------------------
 
 class Register:
-    def __init__(self):
+    def __init__(self, app_ctrl: AppController):
         try:
-            self.app_ctrl = AppController.connect()
+            self.app_ctrl = app_ctrl
 
             if self.app_ctrl.is_comp_setup():
                 assert self.app_ctrl.db is not None
@@ -264,9 +264,9 @@ class Register:
             _error_and_stop(e)
 
     @classmethod
-    def connect(cls) -> "Register":
+    def connect(cls, app_ctrl: AppController) -> "Register":
         session_key = f"Register"
-        return sm.get_session_state_singleton(session_key, lambda: cls())
+        return sm.get_session_state_singleton(session_key, lambda: cls(app_ctrl))
     
     def create_judge_user(self, user_name: str, password: str):
         try:
@@ -289,9 +289,9 @@ class Register:
 # --------------------------------------------------------------------------------------------------------------
 
 class CompScoreSheetAi:
-    def __init__(self):
+    def __init__(self, app_ctrl: AppController):
         try:
-            self.app_ctrl = AppController.connect()
+            self.app_ctrl = app_ctrl
 
             if self.app_ctrl.is_comp_setup():
                 assert self.app_ctrl.db is not None
@@ -307,9 +307,9 @@ class CompScoreSheetAi:
             _error_and_stop(e)
     
     @classmethod
-    def connect(cls) -> "CompScoreSheetAi":
+    def connect(cls, app_ctrl: AppController) -> "CompScoreSheetAi":
         session_key = f"CompScoreSheetAi"
-        return sm.get_session_state_singleton(session_key, lambda: cls())
+        return sm.get_session_state_singleton(session_key, lambda: cls(app_ctrl))
     
     def get_score_sheet_singleton(self) -> dm.ScoreSheet:
         return sm.get_session_state_singleton("current_score_sheet", lambda: None)

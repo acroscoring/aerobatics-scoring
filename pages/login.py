@@ -1,13 +1,8 @@
 import streamlit as st
-from util.controller import AppController
-from pages.sidebar import load_sidebar
+from pages.header import load
 
-st.set_page_config(page_title="Login", page_icon="🔐", layout="wide")
-st.title("🔐 AeroScoring Login")
+app_ctrl = load(page_title="Login", page_icon="🔐", frame_title="🔐 AeroScoring Login")
 
-load_sidebar()
-
-app_ctrl = AppController.connect()
 if app_ctrl.is_user_logged_in():
     assert app_ctrl.db is not None
     st.header(app_ctrl.db.title)

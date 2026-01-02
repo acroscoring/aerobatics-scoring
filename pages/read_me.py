@@ -1,7 +1,6 @@
 import streamlit as st
-from pages.sidebar import load_sidebar
+from pages.header import load
 
-st.set_page_config(page_title="Read Me", page_icon="📖", layout="wide")
-st.title("📖 Documentation")
+app_ctrl = load(page_title="Read Me", page_icon="📖", frame_title="📖 Documentation")
 
-load_sidebar()
+st.balloons()

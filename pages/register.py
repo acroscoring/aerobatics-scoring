@@ -1,13 +1,9 @@
 import streamlit as st
 from util.controller import Register
-from pages.sidebar import load_sidebar
+from pages.header import load
 
-st.set_page_config(page_title="Registration", page_icon="📝", layout="wide")
-st.title("📝 Create Judge User to Upload Scores")
-
-load_sidebar()
-
-app_reg = Register.connect()
+app_ctrl = load(page_title="Registration", page_icon="📝", frame_title="📝 Create Judge User to Upload Scores")
+app_reg = Register.connect(app_ctrl)
 st.header(app_reg.db.title)
 
 st.subheader(f"Welcome {app_reg.judge_details.name}!")
