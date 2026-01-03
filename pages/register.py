@@ -2,7 +2,7 @@ import streamlit as st
 from util.controller import Register
 from pages.header import load
 
-app_ctrl, cookies = load(title="📝 Create Judge User to Upload Scores")
+app_ctrl = load(title="📝 Create Judge User to Upload Scores")
 app_reg = Register.connect(app_ctrl)
 st.header(app_reg.db.title)
 

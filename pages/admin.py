@@ -1,7 +1,7 @@
 import streamlit as st
 from pages.header import load
 
-app_ctrl, cookies = load(title="⚙️ Administration")
+app_ctrl = load(title="⚙️ Administration")
 
 if app_ctrl.is_user_logged_in():
     assert app_ctrl.db is not None
@@ -14,7 +14,7 @@ elif app_ctrl.is_comp_setup():
     st.write("Login to manage the current competition or create a new competition")
     if st.button("Create New Comp", type="primary", key="create_new_comp_bt"):
         assert app_ctrl.db is not None
-        app_ctrl.logout_user(cookies)
+        app_ctrl.logout_user()
 
 else:
     st.header("Create a new competition")
@@ -30,6 +30,6 @@ else:
             with st.spinner("Creating competition...", show_time=True):
                 app_ctrl.create_new_comp(comp_name=comp_name, user_name=user_name, admin_email=admin_email, password=password)
                 st.success(f"Competition created successfully and an email was sent to you {user_name}!", icon="✅")
-                app_ctrl.login(cookies, admin_email, password)
+                app_ctrl.login(admin_email, password)
                   
         

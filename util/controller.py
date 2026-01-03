@@ -107,11 +107,13 @@ class CompDB:
 # --------------------------------------------------------------------------------------------------------------
 
 class AuthService:
-    def __init__(self):
+    def __init__(self, cookies: CookieManager):
         self._cookie_name = "auth_token"
         self.user = None
+        self._cookies = cookies
 
     def refresh(self, cookies: CookieManager):
+        self._cookies = cookies
         auth_user = sm.get_session_state("auth_user")
         if not auth_user:
             token = cookies.get(self._cookie_name)
@@ -121,39 +123,39 @@ class AuthService:
         self._set_user(auth_user)
 
     @classmethod
-    def connect(cls) -> "AuthService":
+    def connect(cls, cookies: CookieManager) -> "AuthService":
         session_key = f"AuthService"
-        return sm.get_session_state_singleton(session_key, lambda: cls())
+        return sm.get_session_state_singleton(session_key, lambda: cls(cookies))
     
     def _set_user(self, auth_user: dm.AuthUser | None):
         sm.set_session_state("auth_user", auth_user)
         self.user = auth_user
         
-    def login(self, cookies: CookieManager, db: gm.SheetDB, email: str, password: str):
+    def login(self, db: gm.SheetDB, email: str, password: str):
         try:
             user = db.authenticate_user(email=email, password=password)
             auth_user = dm.AuthUser.from_user(user=user, comp_id=db.id)
             token = sec.create_token(auth_user)
-            cookies[self._cookie_name] = token
-            cookies.save()
+            self._cookies[self._cookie_name] = token
+            self._cookies.save()
             self._set_user(auth_user)
         except Exception as e:
             _error_and_stop(e)
 
-    def forgot_password(self, cookies: CookieManager, db: gm.SheetDB, email: str):
+    def forgot_password(self, db: gm.SheetDB, email: str):
         try:
             db.get_user_by_email(email)    
             temp_pass = str(uuid.uuid4())[:6]
             db.update_user_password(email, temp_pass)
-            self.logout(cookies)
+            self.logout()
             # Send email with new password
             st.toast("Check your email for the temporary password.")
         except Exception as e:
             _error_and_stop(e)
 
-    def logout(self, cookies: CookieManager):
-        del cookies[self._cookie_name]
-        cookies.save()
+    def logout(self):
+        del self._cookies[self._cookie_name]
+        self._cookies.save()
         self._set_user(None)
 
 # --------------------------------------------------------------------------------------------------------------
@@ -161,8 +163,8 @@ class AuthService:
 # --------------------------------------------------------------------------------------------------------------
 
 class AppController:
-    def __init__(self):
-        self._auth = AuthService.connect()
+    def __init__(self, cookies: CookieManager):
+        self._auth = AuthService.connect(cookies)
         self.auth_user = None
         self._comp_db = None
         self.db = None
@@ -186,13 +188,15 @@ class AppController:
         self.db = CompDB.connect(comp_id).db if comp_id else None
 
         if (comp_id is None) or (comp_id != comp_id_from_auth):
-            self._auth.logout(cookies)
+            self._auth.logout()
             self.auth_user = None
     
     @classmethod
-    def connect(cls) -> "AppController":
+    def connect(cls, cookies: CookieManager) -> "AppController":
         session_key = f"AppController"
-        return sm.get_session_state_singleton(session_key, lambda: cls())
+        ctlr: AppController = sm.get_session_state_singleton(session_key, lambda: cls(cookies))
+        ctlr.refresh_auth(cookies)
+        return ctlr
     
     def is_comp_setup(self) -> bool:
         return self.db is not None
@@ -204,9 +208,9 @@ class AppController:
         self._comp_db = CompDB.create(comp_name=comp_name, user_name=user_name, admin_email=admin_email, password=password)
         self.db = self._comp_db.db
     
-    def login(self, cookies: CookieManager, email: str, password: str):
+    def login(self, email: str, password: str):
         if self.db:
-            self._auth.login(cookies, self.db, email, password)
+            self._auth.login(self.db, email, password)
             self.auth_user = self._auth.user
             assert self.auth_user is not None
             st.toast(f"Logged in {self.auth_user.username}!")
@@ -214,23 +218,23 @@ class AppController:
         else:
             raise Exception("Competition not set up for login!")
 
-    def forgot_password(self, cookies: CookieManager, email: str):
+    def forgot_password(self, email: str):
         if self.db:
-            self._auth.forgot_password(cookies, self.db, email)
+            self._auth.forgot_password( self.db, email)
         else:
             raise Exception("Competition not set up for forgot password!")
         
-    def logout_user(self, cookies: CookieManager):
-        self._auth.logout(cookies)
+    def logout_user(self):
+        self._auth.logout()
         self.auth_user = None
         st.rerun()
     
-    def logout_comp(self, cookies: CookieManager):
+    def logout_comp(self):
         if self._comp_db:
             self._comp_db.delete_id_session_state()
         self._comp_db = None
         self.db = None
-        self.logout_user(cookies)
+        self.logout_user()
 
 # --------------------------------------------------------------------------------------------------------------
 # Judge

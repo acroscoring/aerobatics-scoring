@@ -2,14 +2,12 @@ import streamlit as st
 from util.controller import AppController
 from streamlit_cookies_manager import CookieManager # type: ignore
 
-def load(title: str) -> tuple[AppController, CookieManager]:
-    #cookies = EncryptedCookieManager(prefix="aeroscoring-", password=st.secrets.auth.cookie_password)
+def load(title: str) -> AppController:
     cookies = CookieManager()
     if not cookies.ready():
         st.stop()
 
-    app_ctrl = AppController.connect()
-    app_ctrl.refresh_auth(cookies)
+    app_ctrl = AppController.connect(cookies)
     
     st.title(title, text_alignment="center")
 
@@ -27,4 +25,4 @@ def load(title: str) -> tuple[AppController, CookieManager]:
         with st.expander("Debug State"):
             st.write(st.session_state)
 
-    return app_ctrl, cookies
+    return app_ctrl

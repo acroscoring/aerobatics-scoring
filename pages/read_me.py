@@ -1,6 +1,6 @@
 import streamlit as st
 from pages.header import load
 
-app_ctrl, cookies = load(title="📖 Documentation")
+app_ctrl = load(title="📖 Documentation")
 
 st.balloons()

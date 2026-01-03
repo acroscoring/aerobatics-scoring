@@ -4,7 +4,7 @@ from PIL import Image
 import pandas as pd
 from pages.header import load
 
-app_ctrl, cookies = load(title="🏆 Competition Scoring")
+app_ctrl = load(title="🏆 Competition Scoring")
 ctrl = CompScoreSheetAi.connect(app_ctrl)
 st.header(ctrl.db.title)
 
