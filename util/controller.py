@@ -152,7 +152,8 @@ class AuthService:
             _error_and_stop(e)
 
     def logout(self, cookies: EncryptedCookieManager):
-        del cookies[self._cookie_name]
+        #del cookies[self._cookie_name]
+        cookies[self._cookie_name] = "Logged Out" # workaround as delete is not working
         cookies.save()
         self._set_user(None)
 
