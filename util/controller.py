@@ -7,7 +7,7 @@ import util.streamlit_model as sm
 from PIL.Image import Image
 from pandas import DataFrame
 import uuid
-from streamlit_cookies_manager import EncryptedCookieManager # type: ignore
+from streamlit_cookies_manager import CookieManager # type: ignore
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -111,7 +111,7 @@ class AuthService:
         self._cookie_name = "auth_token"
         self.user = None
 
-    def refresh(self, cookies: EncryptedCookieManager):
+    def refresh(self, cookies: CookieManager):
         auth_user = sm.get_session_state("auth_user")
         if not auth_user:
             token = cookies.get(self._cookie_name)
@@ -129,7 +129,7 @@ class AuthService:
         sm.set_session_state("auth_user", auth_user)
         self.user = auth_user
         
-    def login(self, cookies: EncryptedCookieManager, db: gm.SheetDB, email: str, password: str):
+    def login(self, cookies: CookieManager, db: gm.SheetDB, email: str, password: str):
         try:
             user = db.authenticate_user(email=email, password=password)
             auth_user = dm.AuthUser.from_user(user=user, comp_id=db.id)
@@ -140,7 +140,7 @@ class AuthService:
         except Exception as e:
             _error_and_stop(e)
 
-    def forgot_password(self, cookies: EncryptedCookieManager, db: gm.SheetDB, email: str):
+    def forgot_password(self, cookies: CookieManager, db: gm.SheetDB, email: str):
         try:
             db.get_user_by_email(email)    
             temp_pass = str(uuid.uuid4())[:6]
@@ -151,9 +151,8 @@ class AuthService:
         except Exception as e:
             _error_and_stop(e)
 
-    def logout(self, cookies: EncryptedCookieManager):
-        #del cookies[self._cookie_name]
-        cookies[self._cookie_name] = "Logged Out" # workaround as delete is not working
+    def logout(self, cookies: CookieManager):
+        del cookies[self._cookie_name]
         cookies.save()
         self._set_user(None)
 
@@ -168,7 +167,7 @@ class AppController:
         self._comp_db = None
         self.db = None
 
-    def refresh_auth(self, cookies: EncryptedCookieManager):
+    def refresh_auth(self, cookies: CookieManager):
         self._auth.refresh(cookies)
         self.auth_user = None
         comp_id_from_auth = None
@@ -205,7 +204,7 @@ class AppController:
         self._comp_db = CompDB.create(comp_name=comp_name, user_name=user_name, admin_email=admin_email, password=password)
         self.db = self._comp_db.db
     
-    def login(self, cookies: EncryptedCookieManager, email: str, password: str):
+    def login(self, cookies: CookieManager, email: str, password: str):
         if self.db:
             self._auth.login(cookies, self.db, email, password)
             self.auth_user = self._auth.user
@@ -215,18 +214,18 @@ class AppController:
         else:
             raise Exception("Competition not set up for login!")
 
-    def forgot_password(self, cookies: EncryptedCookieManager, email: str):
+    def forgot_password(self, cookies: CookieManager, email: str):
         if self.db:
             self._auth.forgot_password(cookies, self.db, email)
         else:
             raise Exception("Competition not set up for forgot password!")
         
-    def logout_user(self, cookies: EncryptedCookieManager):
+    def logout_user(self, cookies: CookieManager):
         self._auth.logout(cookies)
         self.auth_user = None
         st.rerun()
     
-    def logout_comp(self, cookies: EncryptedCookieManager):
+    def logout_comp(self, cookies: CookieManager):
         if self._comp_db:
             self._comp_db.delete_id_session_state()
         self._comp_db = None

@@ -1,9 +1,10 @@
 import streamlit as st
 from util.controller import AppController
-from streamlit_cookies_manager import EncryptedCookieManager # type: ignore
+from streamlit_cookies_manager import CookieManager # type: ignore
 
-def load(title: str) -> tuple[AppController, EncryptedCookieManager]:
-    cookies = EncryptedCookieManager(prefix="aeroscoring-", password=st.secrets.auth.cookie_password, key_params_cookie="cookie_manager")
+def load(title: str) -> tuple[AppController, CookieManager]:
+    #cookies = EncryptedCookieManager(prefix="aeroscoring-", password=st.secrets.auth.cookie_password)
+    cookies = CookieManager()
     if not cookies.ready():
         st.stop()
 
