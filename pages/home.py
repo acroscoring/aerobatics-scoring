@@ -1,5 +1,6 @@
 import streamlit as st
 from pages.header import load
+import util.messages as msg
 
 app_ctrl = load(title="✈️ Aerobatics Scoring System")
 
@@ -12,5 +13,5 @@ elif app_ctrl.is_comp_setup():
     st.header(app_ctrl.db.title)
 
 else:
-    st.write("No competition found. Please open the link sent by your Admin with the competition id.")
+    st.warning(msg.ErrorMsgs.NO_COMP_FOUND, icon="⚠️")
 

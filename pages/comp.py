@@ -8,13 +8,13 @@ app_ctrl = load(title="🏆 Competition Scoring")
 ctrl = CompScoreSheetAi.connect(app_ctrl)
 st.header(ctrl.db.title)
 
-st.markdown("### 📸 Capture Score Sheet")
+st.subheader("📸 Capture Score Sheet")
 st.divider()
 
 current_score_sheet = ctrl.get_score_sheet_singleton()
 if not current_score_sheet:
-    input_method = st.radio("Input method:", ["Upload Image", "Use Camera"], horizontal=True, key="method_rd")
-    img_file = st.camera_input("Take a picture", key="widget_camera") if input_method == "Use Camera" else st.file_uploader("Choose file", type=["jpg", "jpeg", "png", "heic", "heif", "webp"], key="widget_uploader")
+    input_method = st.radio("Input method:", ["⬆️ Upload Image", "📱 Use Camera"], horizontal=True, key="method_rd")
+    img_file = st.camera_input("Take a picture", key="widget_camera") if input_method == "📱 Use Camera" else st.file_uploader("Choose file", type=["jpg", "jpeg", "png", "heic", "heif", "webp"], key="widget_uploader")
 
     if img_file:
         image = Image.open(img_file)
@@ -55,9 +55,9 @@ else:
         key="editor_changes" # Unique key
     )
 
-    if st.button("Submit Verified Scores", type="primary", icon="✅", key="save_score_bt"):
+    if st.button("Submit Verified Scores", type="primary", icon="✅", key="save_score_bt", help="Save this score sheet (into the DB)"):
         ctrl.save_scoring_sheet_data_to_db(pilot_id=pilot_id, flight_num=flight_num, judge_id=judge_id, df=edited_df)
         
-    if st.button("Reset", type="secondary", icon="⏪", help="Clear all back to the start", key="reset_bt"):
+    if st.button("Reset", type="secondary", icon="⏪", help="Clear back to the start of image upload", key="reset_bt"):
         ctrl.reset_comp_ai_ui()
         st.rerun()

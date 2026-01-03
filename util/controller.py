@@ -8,6 +8,7 @@ from PIL.Image import Image
 from pandas import DataFrame
 import uuid
 from streamlit_cookies_manager import CookieManager # type: ignore
+import util.messages as msg
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -295,10 +296,10 @@ class CompScoreSheetAi:
                 assert self.app_ctrl.db is not None
                 self.db = self.app_ctrl.db
             else:
-                raise Exception(f"No competition found. Please use the link provided by your admin (via email).")
+                raise Exception(msg.ErrorMsgs.NO_COMP_FOUND)
             
             if not self.app_ctrl.is_user_logged_in():
-                raise Exception(f"Login to scan add a score sheet.")
+                raise Exception(msg.ErrorMsgs.LOGIN_TO_MNG_COMP)
             else:
                 self.auth_user = self.app_ctrl.auth_user
         except Exception as e:

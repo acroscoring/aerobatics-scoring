@@ -22,7 +22,7 @@ def load(title: str) -> AppController:
             user_id = f" {user.id}" if user.id else ""
             st.badge(f"{user.username} ({user.role.capitalize()}{user_id})", color="green")
 
-        with st.expander("Debug State"):
-            st.write(st.session_state)
+        #with st.expander("Debug State"):
+        #    st.write(st.session_state)
 
     return app_ctrl
