@@ -2,7 +2,7 @@
 from streamlit import cache_resource, secrets, context
 import requests
 import gspread
-from typing import Optional, cast, Literal, Any, List
+from typing import cast, Literal, Any, List
 from pydantic import BaseModel, EmailStr, HttpUrl
 from google import genai
 from PIL import Image
@@ -12,18 +12,41 @@ import util.security_model as sec
 
 # --------------------------------------------------------------------------------------------------------------
 
-class CreateCompetition(BaseModel):
+class CompetitionPayload(BaseModel):
     comp_name: str
     admin_email: EmailStr
     bot_email: EmailStr
     app_url: HttpUrl
-    api_secret: str
 
-class CreateCompetitionResponse(BaseModel):
+class EmailPayload(BaseModel):
+    recipient: str
+    copy_to: str
+    subject: str
+    htmlBody: str
+
+
+class CompetitionRequest(BaseModel):
+    api_name: Literal["CREATE_COMPETITION"]
+    api_secret: str
+    payload: CompetitionPayload
+
+class EmailRequest(BaseModel):
+    api_name: Literal["SEND_EMAIL"]
+    api_secret: str
+    payload: EmailPayload
+
+
+class CompetitionResponse(BaseModel):
     status: Literal["Success", "Error"]
-    message: Optional[str] = None
-    sheet_id: Optional[str] = None
-    comp_url: Optional[HttpUrl] = None
+    message: str | None = None
+    sheet_id: str | None = None
+
+class EmailResponse(BaseModel):
+    status: Literal["Success", "Error"]
+    message: str | None = None
+
+ApiRequest = CompetitionRequest | EmailRequest
+ApiResponse = CompetitionResponse | EmailResponse
 
 class DatabaseConnectionError(Exception):
     pass
@@ -111,21 +134,26 @@ class SheetDB:
             if not context.url:
                 raise Exception(f"Error getting context URL.")
 
-            payload = CreateCompetition(
+            payload = CompetitionPayload(
                 comp_name = comp_name,
                 admin_email = admin_email,
                 bot_email = secrets["gcp_service_account"]["client_email"],
                 app_url = HttpUrl(context.url), # no query parameters
-                api_secret = secrets["google_app_script"]["api_secret"]
+            )
+
+            api_request = CompetitionRequest(
+                api_name="CREATE_COMPETITION",
+                api_secret = secrets["google_app_script"]["api_secret"],
+                payload=payload
             )
             
             api_url: str = secrets["google_app_script"]["prod_url"] if secrets["env"]["type"] == "prod" else secrets["google_app_script"]["dev_url"]
-            response = requests.post(api_url, json=payload.model_dump(mode='json'))
+            response = requests.post(api_url, json=api_request.model_dump(mode='json'))
             
             if response.status_code != 200:
                 raise DatabaseConnectionError(f"HTTP Error: {response.status_code} - {response.text}")
         
-            result = CreateCompetitionResponse(**response.json())
+            result = CompetitionResponse(**response.json())
             
             if result.status != "Success":
                 raise DatabaseConnectionError(f"Create Competition Apps Script Error: {result.message}")

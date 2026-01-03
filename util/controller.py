@@ -250,13 +250,8 @@ class Register:
                 assert self.app_ctrl.db is not None
                 self.db = self.app_ctrl.db
             else:
-                raise Exception(f"No competition found. Please use the link provided by your admin (via email) to register.")
+                raise Exception(msg.ErrorMsgs.NO_COMP_FOUND)
             
-            if self.app_ctrl.is_user_logged_in():
-                raise Exception(f"Logout to register a new user.")
-            else:
-                self.auth_user = self.app_ctrl.auth_user
-
             judge_id = Register._get_judge_id_from_query_params()
             self.judge_details = self.db.get_judge_details(judge_id)
         except Exception as e:
@@ -279,7 +274,7 @@ class Register:
         judge_id = st.query_params.get("judge_id")
         
         if not judge_id:
-            raise MissingJudgeId("No judge ID found in URL (query parameter judge_id).")
+            raise MissingJudgeId(msg.ErrorMsgs.NO_JUDGE_ID)
 
         return int(judge_id)
 
