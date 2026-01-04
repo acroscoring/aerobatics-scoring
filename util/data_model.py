@@ -95,3 +95,40 @@ class Judge(BaseModel):
         if (id < 1) or (id > 99):
             raise ValueError("Invalid judge ID (should be between 01 and 99).")
         return id
+
+
+
+# --------------------------------------------------------------------------------------------------------------
+# ACRO
+# --------------------------------------------------------------------------------------------------------------
+
+class AcroJudge(BaseModel):
+    id: int
+    first_name: str = Field(alias="name1", default="")
+    surname: str = Field(alias="name2", default="")
+
+class AcroPilot(BaseModel):
+    id: int
+    first_name: str = Field(alias="name1", default="")
+    surname: str = Field(alias="name2", default="")
+    category: str = Field(alias="lev1", default="")
+    active: str = Field(default="A") # 'A' or 'N'
+    registration: str = Field(alias="acreg", default="")
+    aircraft: str = Field(alias="actype", default="")
+
+class AcroSequence(BaseModel):
+    id: int
+    title: str = Field(default="")
+    rpt_header: str = Field(alias="rpthdr", default="")
+    active: str = Field(default="A")
+    level: str = Field(default="")
+    type_code: str = Field(alias="type", default="")
+    is_locked: str = Field(alias="lock", default="N")
+    
+    # Complex fields parsed into strings/JSON for the sheet
+    fly_order: str = Field(alias="flyorder", default="") # e.g., "001, 002, 003"
+    judges_config: str = Field(alias="judges", default="") # e.g., "05(AC), 06(AJ)"
+    fps_mode: Optional[int] = Field(alias="fps", default=None)
+    
+    # Scoring/K-Factor details could be added here as needed
+    k_factors: str = Field(alias="knownkfacts", default="")

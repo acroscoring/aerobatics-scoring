@@ -4,6 +4,7 @@ google-auth
 google-api-python-client
 google-api-python-client-stubs
 google-genai
+gspread-dataframe
 pydantic
 pydantic[email]
 pillow

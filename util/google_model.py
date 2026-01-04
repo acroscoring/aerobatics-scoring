@@ -9,6 +9,8 @@ from PIL import Image
 from util.streamlit_model import get_session_state_singleton
 import util.data_model as dm
 import util.security_model as sec
+from gspread_dataframe import set_with_dataframe # type: ignore
+import pandas as pd
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -261,3 +263,13 @@ class SheetDB:
             raise Exception(f"Missing AI Secret Configuration: {e}")
         except Exception as e:
             raise Exception(f"AI getting score error: {e}")
+        
+    def update_tab_from_df(self, tab_name: str, df: pd.DataFrame):
+        try:
+            ws = self._sheet.worksheet(tab_name)
+            ws.clear()
+            # Write headers and data
+            set_with_dataframe(ws, df) 
+            return True, f"Updated {tab_name} with {len(df)} rows."
+        except Exception as e:
+            return False, f"Error updating {tab_name}: {str(e)}"
