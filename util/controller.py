@@ -1,5 +1,5 @@
 import streamlit as st
-from typing import Any, List, Dict, cast
+#from typing import Any, List, Dict, cast
 import util.google_model as gm
 import util.data_model as dm
 import util.security_model as sec
@@ -319,21 +319,22 @@ class CompScoreSheetAi:
             _error_and_stop(e)
 
     def save_scoring_sheet_data_to_db(self, pilot_id: int, flight_num: int, judge_id: int, df: DataFrame):
-        try:
-            raw_data = cast(List[Dict[str, Any]], df.to_dict(orient="records")) # type: ignore
+        pass
+        # try:
+        #     raw_data = cast(List[Dict[str, Any]], df.to_dict(orient="records")) # type: ignore
 
-            updated_figures = [dm.FigureScore(**row) for row in raw_data]
+        #     updated_figures = [dm.FigureScore(**row) for row in raw_data]
 
-            final_score_sheet = dm.ScoreSheet(
-                pilot_id=pilot_id,
-                flight_number=flight_num,
-                judge_id=judge_id,
-                figures=updated_figures
-            )
+        #     final_score_sheet = dm.ScoreSheet(
+        #         pilot_id=pilot_id,
+        #         flight_number=flight_num,
+        #         judge_id=judge_id,
+        #         figures=updated_figures
+        #     )
 
-            self.db.save_scoring_sheet_data(final_score_sheet)
-        except Exception as e:
-            _error_and_stop(e)
+        #     self.db.save_scoring_sheet_data(final_score_sheet)
+        # except Exception as e:
+        #     _error_and_stop(e)
 
     def reset_comp_ai_ui(self):
         sm.delete_session_state("current_score_sheet")

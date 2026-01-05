@@ -2,26 +2,42 @@ import re
 import pandas as pd
 from collections import defaultdict
 from typing import Dict, DefaultDict, List, Any, Optional
-from util.data_model import AcroJudge, AcroPilot, AcroSequence
+from util.data_model import AcroJudge, AcroPilot, AcroSequence, AcroMark
 
 class CtxParser:
-    # Regex to capture <TableID_Column>Value
-    # Group 1: Table (judge, pilot, seq)
-    # Group 2: ID (digits)
-    # Group 3: Column Name
-    # Group 4: Value
-    LINE_REGEX = re.compile(r"^<([a-z]+)(\d+)_([a-z0-9]+)>(.*)$")
+    def raw_file_to_df(self, file_content: str) -> pd.DataFrame:
+        return pd.DataFrame({"raw_content": file_content.splitlines()})
 
-    def parse_file(self, file_content: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """
-        Parses raw .ctx string content into 3 DataFrames.
-        """
+    def parse_file(self, file_content: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        # Regex to capture <TableID_Column>Value
+        # Group 1: Table (judge, pilot, seq); Group 2: ID (digits); Group 3: Column Name; Group 4: Value
+        LINE_REGEX = re.compile(r"^<([a-z]+)(\d+)_([a-z0-9]+)>(.*)$")
+
+        # Regex for Marks <marks_01p031J07>Value
+        # Group 1: Seq ID; Group 2: Pilot ID; Group 3: Judge ID; Group 4: Value
+        MARKS_REGEX = re.compile(r"^<marks_(\d+)p(\d+)J(\d+)>(.*)$")
+
         raw_data: DefaultDict[str, DefaultDict[int, Dict[str, str]]] = defaultdict(lambda: defaultdict(dict))
+        raw_marks: List[Dict[str, Any]] = []
 
         # 1. First Pass: Extract key-values into nested dict
         for line in file_content.splitlines():
             line = line.strip()
-            match = self.LINE_REGEX.match(line)
+
+            # Try matching the Marks format first
+            mark_match = MARKS_REGEX.match(line)
+            if mark_match:
+                s_id, p_id, j_id, val = mark_match.groups()
+                raw_marks.append({
+                    "sequence_id": int(s_id),
+                    "pilot_id": int(p_id),
+                    "judge_id": int(j_id),
+                    "raw_value": val
+                })
+                continue # Skip to next line
+
+            # Standard generic format
+            match = LINE_REGEX.match(line)
             if match:
                 table, item_id, column, value = match.groups()
                 # Store by Table -> ID -> Column
@@ -33,7 +49,9 @@ class CtxParser:
         pilots = self._process_pilots(raw_data.get("pilot", empty_dict))
         sequences = self._process_sequences(raw_data.get("seq", empty_dict))
 
-        return judges, pilots, sequences
+        marks = self._process_marks(raw_marks)
+
+        return judges, pilots, sequences, marks
 
     def _process_judges(self, data: Dict[int, Dict[str, str]]) -> pd.DataFrame:
         models: List[AcroJudge] = []
@@ -105,5 +123,39 @@ class CtxParser:
             result += f" | {hz_found}"
         return result
     
-    def raw_file_to_df(self, file_content: str) -> pd.DataFrame:
-        return pd.DataFrame({"raw_content": file_content.splitlines()})
+    def _process_marks(self, data: List[Dict[str, Any]]) -> pd.DataFrame:
+        marks: List[AcroMark] = []
+        
+        for item in data:
+            raw_val = item.pop("raw_value", "")
+            
+            mark_data = {
+                "sequence_id": item["sequence_id"],
+                "pilot_id": item["pilot_id"],
+                "judge_id": item["judge_id"]
+            }
+            
+            pos = 0
+            
+            # 1. Figures: 20 blocks of 2 chars
+            for i in range(1, 21):
+                chunk = raw_val[pos : pos + 2] 
+                mark_data[f"fig{i:02d}"] = chunk.strip()
+                pos += 2
+                
+            # 2. OAKs: 3 blocks of 2 chars
+            for i in range(1, 4):
+                chunk = raw_val[pos : pos + 2]
+                mark_data[f"oak{i}"] = chunk.strip()
+                pos += 2
+                
+            # 3. Penalties: 10 blocks of 3 chars
+            for i in range(1, 11):
+                chunk = raw_val[pos : pos + 3]
+                mark_data[f"pen{i:02d}"] = chunk.strip()
+                pos += 3
+
+            marks.append(AcroMark(**mark_data))
+
+        return self._to_df(marks)
+    

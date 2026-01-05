@@ -19,20 +19,22 @@ def render_admin_page():
         # 2. Preview Data
         st.info("Parsing file...")
         parser = CtxParser()
-        df_judges, df_pilots, df_sequences = parser.parse_file(file_content)
+        df_judges, df_pilots, df_sequences, df_marks = parser.parse_file(file_content)
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Judges Found", len(df_judges))
-        col2.metric("Pilots Found", len(df_pilots))
-        col3.metric("Sequences Found", len(df_sequences))
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Judges", len(df_judges))
+        col2.metric("Pilots", len(df_pilots))
+        col3.metric("Sequences", len(df_sequences))
+        col4.metric("Marks", len(df_marks))
 
-        with st.expander("Preview Extracted Data"):
+        with st.expander("Preview 5 Rows of Extracted Data"):
             st.write("### Judges", df_judges.head())
             st.write("### Pilots", df_pilots.head())
             st.write("### Sequences", df_sequences.head())
+            st.write("### Marks", df_marks.head())
 
         # 3. Update Action
-        if st.button("Confirm Update", type="primary"):
+        if st.button("Confirm Update", type="primary", icon="🚀"):
             assert app_ctrl.db is not None
             progress_bar = st.progress(0)
             status_area = st.empty()
@@ -43,29 +45,33 @@ def render_admin_page():
             if not success_r: 
                 st.error(msg_r)
                 return
-            progress_bar.progress(25)
+            progress_bar.progress(20)
             
-            # Update Judges
             status_area.text("Updating Judges...")
             success_j, msg_j = app_ctrl.db.update_tab_from_df("ACRO Judges", df_judges)
             if not success_j:
                 st.error(msg_j)
                 return
-            progress_bar.progress(50)
+            progress_bar.progress(40)
 
-            # Update Pilots
             status_area.text("Updating Pilots...")
             success_p, msg_p = app_ctrl.db.update_tab_from_df("ACRO Pilots", df_pilots)
             if not success_p: 
                 st.error(msg_p)
                 return
-            progress_bar.progress(75)
+            progress_bar.progress(60)
 
-            # Update Sequences
             status_area.text("Updating Sequences...")
             success_s, msg_s = app_ctrl.db.update_tab_from_df("ACRO Sequences", df_sequences)
             if not success_s: 
                 st.error(msg_s)
+                return
+            progress_bar.progress(80)
+
+            status_area.text("Updating Marks...")
+            success_m, msg_m = app_ctrl.db.update_tab_from_df("ACRO Marks", df_marks)
+            if not success_m: 
+                st.error(msg_m)
                 return
             progress_bar.progress(100)
 
