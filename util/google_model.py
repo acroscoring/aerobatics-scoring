@@ -2,15 +2,16 @@
 from streamlit import cache_resource, secrets, context
 import requests
 import gspread
-from typing import cast, Literal, Any, List
+from typing import cast, Literal, Any, List, Tuple
 from pydantic import BaseModel, EmailStr, HttpUrl
 from google import genai
 from PIL import Image
 from util.streamlit_model import get_session_state_singleton
 import util.data_model as dm
 import util.security_model as sec
-from gspread_dataframe import set_with_dataframe # type: ignore
+from gspread_dataframe import set_with_dataframe, get_as_dataframe # type: ignore
 import pandas as pd
+from util.data_model import AcroMark
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -220,10 +221,6 @@ class SheetDB:
             self._users_ws.update_cell(cell.row, cell.col, hashed_pw)
         except Exception as e:
             raise Exception(f"Password update error: {e}")
-    
-    def save_scoring_sheet_data(self, score_data: dm.ScoreSheet):
-        #to do
-        pass    
 
     def get_all_judges(self) -> List[dm.Judge]:
         try:
@@ -264,7 +261,7 @@ class SheetDB:
         except Exception as e:
             raise Exception(f"AI getting score error: {e}")
         
-    def update_tab_from_df(self, tab_name: str, df: pd.DataFrame):
+    def update_tab_from_df(self, tab_name: str, df: pd.DataFrame) -> Tuple[bool, str]:
         try:
             ws = self._sheet.worksheet(tab_name)
             ws.clear()
@@ -273,3 +270,51 @@ class SheetDB:
             return True, f"Updated {tab_name} with {len(df)} rows."
         except Exception as e:
             return False, f"Error updating {tab_name}: {str(e)}"
+    
+    def get_table(self, tab_name: str) -> pd.DataFrame:
+        try:
+            ws = self._sheet.worksheet(tab_name)
+            return get_as_dataframe(ws) # type: ignore
+        except Exception as e:
+            raise Exception(f"Error getting tab {tab_name}: {str(e)}")
+    
+    def upsert_mark(self, mark: AcroMark) -> Tuple[bool, str]:
+        try:
+            ws = self._sheet.worksheet("Marks")
+
+            # "Blank Sheet"
+            model_data = mark.model_dump()
+            headers = list(model_data.keys())
+            values = list(model_data.values())
+
+            existing_headers = ws.row_values(1)
+            if not existing_headers:
+                ws.append_row(headers)
+                ws.append_row(values)
+                return True, f"Initialized 'Marks' and added Sequence {mark.sequence_id}, Pilot {mark.pilot_id}, Judge {mark.judge_id}.."
+
+            # Sheet has data
+            data = ws.get_all_records()
+            df = pd.DataFrame(data)
+
+            match = df[
+                (df['sequence_id'] == mark.sequence_id) & 
+                (df['pilot_id'] == mark.pilot_id) & 
+                (df['judge_id'] == mark.judge_id)
+            ]
+
+            # Assume the sheet columns match the model field order exactly.
+            row_values = list(mark.model_dump().values())
+            
+            if not match.empty:
+                # Update existing row
+                row_num = match.index[0] + 2 # +2 for 1-based index + header
+                ws.update(range_name=f"A{row_num}", values=[row_values])
+                return True, f"Updated score for Sequence {mark.sequence_id}, Pilot {mark.pilot_id}, Judge {mark.judge_id}."
+            else:
+                # Append new row
+                ws.append_row(row_values)
+                return True, f"Added score for Sequence {mark.sequence_id}, Pilot {mark.pilot_id}, Judge {mark.judge_id}."
+
+        except Exception as e:
+            return False, f"Upsert Error: {str(e)}"

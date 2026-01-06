@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, EmailStr, field_validator, ValidationErro
 from typing import List, Dict, Any
 import util.security_model as sec
 from typing import Literal
+import pandas as pd
 
 class FigureScore(BaseModel):
     figure_number: int = Field(description="The Figure/Fig/No number (1, 2, 3...) that normally is the 1st column in a table. Each figure is a row in the table")
@@ -211,3 +212,73 @@ class AcroMark(BaseModel):
     pen08: str = Field(default="")
     pen09: str = Field(default="")
     pen10: str = Field(default="")
+
+    submitted_by: str | None = None
+    timestamp: str | None = None
+
+    @classmethod
+    def from_ai_score_sheet(cls, sheet: "ScoreSheet", figures_df: pd.DataFrame, overall_df: pd.DataFrame, penalty_df: pd.DataFrame, user_email: str, timestamp: str) -> "AcroMark":
+
+        # --- Helper: Safe String Conversion ---
+        def safe_str_score(val: Any) -> str:
+            if pd.isna(val) or val is None or str(val).strip() == "":
+                return ""
+            s = str(val).strip()
+            if s.endswith(".0"): 
+                s = s[:-2] # Convert "8.0" to "8"
+            if s == "10": 
+                return "Tn"
+            return s
+
+        def safe_str_count(val: Any) -> str:
+            if pd.isna(val) or val is None:
+                return ""
+            try:
+                # Handle cases like 1.0 coming from float column
+                i_val = int(float(val))
+                return str(i_val) if i_val > 0 else ""
+            except ValueError:
+                return ""
+
+        # 1. Map Figures
+        figs: Dict[str, str] = {}
+        if not figures_df.empty:
+            # Sort to ensure fig01 maps to figure_number 1
+            figures_df = figures_df.sort_values("figure_number")
+            records = figures_df.to_dict('records') # type: ignore
+            for i in range(20):
+                if i < len(records):
+                    figs[f"fig{i+1:02d}"] = safe_str_score(records[i].get('score'))
+                else:
+                    figs[f"fig{i+1:02d}"] = "" # Default empty string
+
+        # 2. Map OAKs
+        oaks: Dict[str, str] = {}
+        if not overall_df.empty:
+            records = overall_df.to_dict('records') # type: ignore
+            for i in range(3):
+                if i < len(records):
+                    oaks[f"oak{i+1}"] = safe_str_score(records[i].get('score'))
+                else:
+                    oaks[f"oak{i+1}"] = ""
+
+        # 3. Map Penalties
+        pens: Dict[str, str] = {}
+        if not penalty_df.empty:
+            records = penalty_df.to_dict('records') # type: ignore
+            for i in range(10):
+                if i < len(records):
+                    pens[f"pen{i+1:02d}"] = safe_str_count(records[i].get('count'))
+                else:
+                    pens[f"pen{i+1:02d}"] = ""
+
+        return cls(
+            sequence_id=int(sheet.flight_number),
+            pilot_id=int(sheet.pilot_id),
+            judge_id=int(sheet.judge_id),
+            submitted_by=str(user_email),
+            timestamp=str(timestamp),
+            **figs,
+            **oaks,
+            **pens
+        )
