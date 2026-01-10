@@ -3,11 +3,16 @@ from pages.header import load
 import util.messages as msg
 from io import StringIO
 from util.acro_parser import CtxParser
+from typing import Tuple
 
 app_ctrl = load(title="⚙️ Administration")
 
-def render_admin_page():
-    st.markdown("Upload a `.ctx` file to update Judges, Pilots and Sequences.")
+# --------------------------------------------------------------------------------------------------------------
+# Helper Functions
+# --------------------------------------------------------------------------------------------------------------
+
+def render_import_page():
+    st.markdown("Upload the competition's `.ctx` file to define Judges, Pilots and Sequences.")
 
     uploaded_file = st.file_uploader("Choose a CTX file", type="ctx")
 
@@ -17,7 +22,7 @@ def render_admin_page():
         file_content = stringio.read()
 
         # 2. Preview Data
-        st.info("Parsing file...")
+        #st.info("Parsing file...")
         parser = CtxParser()
         df_judges, df_pilots, df_sequences, df_marks = parser.parse_file(file_content)
 
@@ -27,7 +32,7 @@ def render_admin_page():
         col3.metric("Sequences", len(df_sequences))
         col4.metric("Marks", len(df_marks))
 
-        with st.expander("Preview 5 Rows of Extracted Data"):
+        with st.expander("Preview the first 5 rows of the ctx file to validate it's the correct one"):
             st.write("### Judges", df_judges.head())
             st.write("### Pilots", df_pilots.head())
             st.write("### Sequences", df_sequences.head())
@@ -39,55 +44,48 @@ def render_admin_page():
             progress_bar = st.progress(0)
             status_area = st.empty()
 
-            status_area.text("Saving Raw File...")
+            def render_error_or_progress(progress_value: int, process_tuple: Tuple[bool, str]) -> bool:
+                success, msg = process_tuple
+                if not success:
+                    st.error(msg, icon="🚫")
+                    return False
+                progress_bar.progress(value=progress_value, text=msg)
+                return True
+
+            # ------- Sync CTX File & App -------
+            status_area.text("Syncing Data...")
+            if not render_error_or_progress(10, app_ctrl.db.sync_acro_judges(df_judges)): return
+
+
+            # ------- Save CTX File -------
+            status_area.text("Saving ACRO File...")
             df_raw = parser.raw_file_to_df(file_content)
-            success_r, msg_r = app_ctrl.db.update_tab_from_df("ACRO File", df_raw)
-            if not success_r: 
-                st.error(msg_r)
-                return
-            progress_bar.progress(20)
-            
-            status_area.text("Updating Judges...")
-            success_j, msg_j = app_ctrl.db.update_tab_from_df("ACRO Judges", df_judges)
-            if not success_j:
-                st.error(msg_j)
-                return
-            progress_bar.progress(40)
-
-            status_area.text("Updating Pilots...")
-            success_p, msg_p = app_ctrl.db.update_tab_from_df("ACRO Pilots", df_pilots)
-            if not success_p: 
-                st.error(msg_p)
-                return
-            progress_bar.progress(60)
-
-            status_area.text("Updating Sequences...")
-            success_s, msg_s = app_ctrl.db.update_tab_from_df("ACRO Sequences", df_sequences)
-            if not success_s: 
-                st.error(msg_s)
-                return
-            progress_bar.progress(80)
-
-            status_area.text("Updating Marks...")
-            success_m, msg_m = app_ctrl.db.update_tab_from_df("ACRO Marks", df_marks)
-            if not success_m: 
-                st.error(msg_m)
-                return
-            progress_bar.progress(100)
+            if not render_error_or_progress(60, app_ctrl.db.update_tab_from_df("ACRO File", df_raw)): return
+            if not render_error_or_progress(70, app_ctrl.db.update_tab_from_df("ACRO Judges", df_judges)): return
+            if not render_error_or_progress(80, app_ctrl.db.update_tab_from_df("ACRO Pilots", df_pilots)): return
+            if not render_error_or_progress(90, app_ctrl.db.update_tab_from_df("ACRO Sequences", df_sequences)): return
+            if not render_error_or_progress(100, app_ctrl.db.update_tab_from_df("ACRO Marks", df_marks)): return
 
             status_area.text("Done!")
             st.success("Database successfully updated from CTX file.")
 
 
 
+# --------------------------------------------------------------------------------------------------------------
+# Main Page
+# --------------------------------------------------------------------------------------------------------------
+
 if app_ctrl.is_user_logged_in():
     assert app_ctrl.db is not None
     st.header(app_ctrl.db.title)
     st.subheader("👩🏼‍💻 Admin Controls")
 
-    tab_ctx, tab_other = st.tabs(["Acro Import", "Other"])
-    with tab_ctx:
-        render_admin_page()
+    tab_import, tab_judges, tab_users, tab_other = st.tabs(["Acro Import", "Judges", "Users", "Other"])
+    with tab_import:
+        render_import_page()
+    with tab_judges:
+        #render_judges_page()
+        pass
 
 elif app_ctrl.is_comp_setup():
     assert app_ctrl.db is not None

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr, field_validator, ValidationError
+from pydantic import BaseModel, Field, EmailStr, field_validator, ValidationError, ConfigDict
 from typing import List, Dict, Any
 import util.security_model as sec
 from typing import Literal
@@ -90,16 +90,27 @@ class AuthUser(UserBase):
 class Judge(BaseModel):
     id: int
     name: str = Field(min_length=3, max_length=50)
-    email: EmailStr
+    email: EmailStr | Literal[""]
 
-    def to_sheet_row(self, headers: List[str]) -> List[str]:
+    def to_sheet_row(self, headers: List[str]) -> List[Any]:
         data = self.model_dump()
-        return [str(data.get(h)) for h in headers]
+        return [data.get(h) for h in headers]
 
     @classmethod
     def from_sheet_record(cls, record: Dict[str, Any]) -> "Judge":
         return cls(**record)
     
+    @classmethod
+    def from_acro_judge(cls, acro_judge: AcroJudge) -> "Judge":
+        full_name = f"{acro_judge.first_name} {acro_judge.surname}"
+        
+        new_judge = Judge(
+            id=acro_judge.id,
+            name=full_name,
+            email=""
+        )
+        return new_judge
+
     @field_validator('id')
     @classmethod
     def valid_id(cls, id: int) -> int:
@@ -114,6 +125,7 @@ class Judge(BaseModel):
 # --------------------------------------------------------------------------------------------------------------
 
 class AcroJudge(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     id: int
     first_name: str = Field(alias="name1", default="")
     surname: str = Field(alias="name2", default="")

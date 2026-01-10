@@ -18,6 +18,9 @@ class MissingCompId(Exception):
 class MissingJudgeId(Exception):
     pass
 
+class judgeIdAlreadyRegistered(Exception):
+    pass
+
 # --------------------------------------------------------------------------------------------------------------
 # UI
 # --------------------------------------------------------------------------------------------------------------
@@ -254,6 +257,11 @@ class Register:
             
             judge_id = Register._get_judge_id_from_query_params()
             self.judge_details = self.db.get_judge_details(judge_id)
+            try:
+                self.db.get_user_by_role_and_id(role="judge", id=judge_id)
+                raise judgeIdAlreadyRegistered(f"Judge ID {judge_id} is already registered.")
+            except gm.UserRoleAndIdNotFound as e:
+                pass
         except Exception as e:
             _error_and_stop(e)
 

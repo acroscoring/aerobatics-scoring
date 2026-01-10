@@ -29,7 +29,7 @@ def validate_submission(flight_num: int, pilot_id: int, judge_id: int, user_id: 
             return False, f"You are logged in as Judge #{user_id} but trying to submit for Judge #{judge_id}. Only the Admin can submit for other judges.", ""
 
     # 2. Check "ACRO Sequences"
-    seq_df: pd.DataFrame = ctrl.db.get_table("ACRO Sequences")
+    seq_df: pd.DataFrame = ctrl.db.get_table_df("ACRO Sequences")
     
     seq_row = seq_df[seq_df['id'] == flight_num]
     if seq_row.empty:
@@ -53,7 +53,7 @@ def validate_submission(flight_num: int, pilot_id: int, judge_id: int, user_id: 
          return False, f"Judge #{judge_id} is not assigned to Seq #{flight_num}. Please check with the Admin and ACRO Scoring.", ""
 
     # 3. Check Duplicate in "Marks"
-    marks_df: pd.DataFrame = ctrl.db.get_table("Marks")
+    marks_df: pd.DataFrame = ctrl.db.get_table_df("Marks")
 
     if marks_df.empty:
         exists = pd.DataFrame()

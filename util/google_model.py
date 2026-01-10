@@ -2,7 +2,7 @@
 from streamlit import cache_resource, secrets, context
 import requests
 import gspread
-from typing import cast, Literal, Any, List, Tuple
+from typing import cast, Literal, Any, List, Tuple, Dict
 from pydantic import BaseModel, EmailStr, HttpUrl
 from google import genai
 from PIL import Image
@@ -11,7 +11,7 @@ import util.data_model as dm
 import util.security_model as sec
 from gspread_dataframe import set_with_dataframe, get_as_dataframe # type: ignore
 import pandas as pd
-from util.data_model import AcroMark
+
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -61,6 +61,9 @@ class UserAlreadyExistsError(Exception):
     pass
 
 class UserEmailNotFound(Exception):
+    pass
+
+class UserRoleAndIdNotFound(Exception):
     pass
 
 class UserInvalidAuth(Exception):
@@ -118,7 +121,7 @@ class SheetDB:
                 raise DatabaseConnectionError("Users tab headers row missing")
             
             self._judges_ws = self._sheet.worksheet("Judges")
-            self._judges_headers = self._users_ws.row_values(1)
+            self._judges_headers = self._judges_ws.row_values(1)
             if not self._judges_headers:
                 raise DatabaseConnectionError("Judges tab headers row missing")
 
@@ -186,6 +189,14 @@ class SheetDB:
             return user
 
         raise UserEmailNotFound(f"User {email} not found in sheet (DB)")
+    
+    def get_user_by_role_and_id(self, role: dm.RoleType, id: int) -> dm.User:
+        users = self.get_all_users()
+        user = next((u for u in users if u.role == role and u.id == id), None)
+        if user:
+            return user
+
+        raise UserRoleAndIdNotFound(f"User with role {role} and ID {id} not found in sheet (DB)")
 
     def register_user(self, user: dm.User):
         try:
@@ -271,14 +282,14 @@ class SheetDB:
         except Exception as e:
             return False, f"Error updating {tab_name}: {str(e)}"
     
-    def get_table(self, tab_name: str) -> pd.DataFrame:
+    def get_table_df(self, tab_name: str) -> pd.DataFrame:
         try:
             ws = self._sheet.worksheet(tab_name)
             return get_as_dataframe(ws) # type: ignore
         except Exception as e:
             raise Exception(f"Error getting tab {tab_name}: {str(e)}")
     
-    def upsert_mark(self, mark: AcroMark) -> Tuple[bool, str]:
+    def upsert_mark(self, mark: dm.AcroMark) -> Tuple[bool, str]:
         try:
             ws = self._sheet.worksheet("Marks")
 
@@ -318,3 +329,35 @@ class SheetDB:
 
         except Exception as e:
             return False, f"Upsert Error: {str(e)}"
+        
+    def sync_acro_judges(self, df_acro_judges: pd.DataFrame) -> Tuple[bool, str]:
+        try:
+            current_judges = self.get_all_judges()
+            current_ids = {j.id for j in current_judges}
+            
+            acro_ids = set(df_acro_judges['id'].astype(int).tolist())
+
+            extra_ids = current_ids - acro_ids
+            if extra_ids:
+                return False, f"Validation Error: The AeroScoring App Judges list has IDs {extra_ids} which are missing from the AcroScoring uploaded ctx file. Please update the legacy ACRO system to include these judges or remove them from the AeroScoring App Judges tab manually."
+
+            missing_ids = acro_ids - current_ids
+            if missing_ids:
+                new_judges_rows: List[List[str]] = []
+                
+                missing_df = df_acro_judges[df_acro_judges['id'].isin(missing_ids)] # type: ignore
+                records =cast(List[Dict[str, Any]], missing_df.to_dict('records')) # type: ignore
+                
+                for record in records:
+                    acro_judge = dm.AcroJudge(**record)
+                    new_judge = dm.Judge.from_acro_judge(acro_judge)
+                    new_judges_rows.append(new_judge.to_sheet_row(self._judges_headers))
+
+                if new_judges_rows:
+                    self._judges_ws.append_rows(new_judges_rows)
+                    return True, f"Synced Judges: Added {len(new_judges_rows)} new judges."
+
+            return True, "Judges validation passed. No changes needed."
+
+        except Exception as e:
+            return False, f"Judge Sync Error: {e}"
