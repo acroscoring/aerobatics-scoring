@@ -208,6 +208,15 @@ class SheetDB:
                 self._users_ws.append_row(row_data)
             except Exception as e:
                 raise Exception(f"Register user error: {e}")
+            
+    def _delete_user_row(self, email: str):
+        try:
+            email_col = self._users_headers.index("email") + 1
+            cell = self._users_ws.find(email, in_column=email_col) # type: ignore
+            if cell:
+                self._users_ws.delete_rows(cell.row)
+        except Exception as e:
+            raise Exception(f"Failed to delete user row: {e}")
 
     def authenticate_user(self, email: str, password: str) -> dm.User:
         try:
@@ -343,7 +352,7 @@ class SheetDB:
 
             missing_ids = acro_ids - current_ids
             if missing_ids:
-                new_judges_rows: List[List[str]] = []
+                new_judges_rows: List[List[Any]] = []
                 
                 missing_df = df_acro_judges[df_acro_judges['id'].isin(missing_ids)] # type: ignore
                 records =cast(List[Dict[str, Any]], missing_df.to_dict('records')) # type: ignore
@@ -361,3 +370,51 @@ class SheetDB:
 
         except Exception as e:
             return False, f"Judge Sync Error: {e}"
+        
+    def delete_judge(self, judge_id: int) -> Tuple[bool, str]:
+        try:
+            id_col = self._judges_headers.index("id") + 1
+            cell = self._judges_ws.find(str(judge_id), in_column=id_col) # type: ignore
+            if not cell:
+                return False, f"Judge ID {judge_id} not found."
+            
+            try:
+                user = self.get_user_by_role_and_id("judge", judge_id)
+                self._delete_user_row(user.email)
+            except UserRoleAndIdNotFound:
+                pass
+            
+            self._judges_ws.delete_rows(cell.row)
+            return True, f"Deleted Judge {judge_id}."
+        except Exception as e:
+            return False, f"Error deleting judge: {e}"
+
+    def update_judge_email(self, judge_id: int, new_email: str) -> Tuple[bool, str]:
+        try:
+            judge = self.get_judge_details(judge_id)
+            old_email = judge.email
+            
+            if old_email == new_email:
+                return True, "No change."
+
+            id_col = self._judges_headers.index("id") + 1
+            cell = self._judges_ws.find(str(judge_id), in_column=id_col) # type: ignore
+            if not cell:
+                return False, f"Judge ID {judge_id} not found in sheet."
+            
+            email_col = self._judges_headers.index("email") + 1
+            self._judges_ws.update_cell(cell.row, email_col, new_email)
+
+            if old_email:
+                try:
+                    user = self.get_user_by_email(old_email)
+                    if user:
+                        self._delete_user_row(old_email)
+                        return True, f"Updated Judge {judge_id} email. Deleted old User account for {old_email}."
+                except UserEmailNotFound:
+                    pass
+
+            return True, f"Updated Judge {judge_id} email to {new_email}."
+
+        except Exception as e:
+            return False, f"Error updating judge email: {e}"

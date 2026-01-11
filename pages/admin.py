@@ -3,7 +3,9 @@ from pages.header import load
 import util.messages as msg
 from io import StringIO
 from util.acro_parser import CtxParser
-from typing import Tuple
+from typing import Tuple, List, Dict, Any
+import pandas as pd
+import util.data_model as dm
 
 app_ctrl = load(title="⚙️ Administration")
 
@@ -69,6 +71,80 @@ def render_import_page():
             status_area.text("Done!")
             st.success("Database successfully updated from CTX file.")
 
+def render_judges_page():
+    st.markdown("Manage the Judges list and their emails. If you update an email, the existing User account (if any) will be reset.")
+
+    assert app_ctrl.db is not None
+    all_judges = app_ctrl.db.get_all_judges()
+    all_users = app_ctrl.db.get_all_users()
+
+    user_map = {u.id: u for u in all_users if u.role == "judge"}
+
+    table_data: List[Dict[str, Any]] = []
+    for j in all_judges:
+        is_registered = j.id in user_map
+        table_data.append({
+            "id": j.id,
+            "name": j.name,
+            "email": j.email,
+            "registered": is_registered
+        })
+    df = pd.DataFrame(table_data)
+    
+    st.data_editor(
+        df,
+        column_config={
+            "id": st.column_config.NumberColumn("ID", format="%d", disabled=True),
+            "name": st.column_config.TextColumn("Judge Name", disabled=True),
+            "email": st.column_config.TextColumn("Email (Editable)"),
+            "registered": st.column_config.CheckboxColumn("User Registered?", disabled=True, help="A user was created in AeroScoring App using this email."),
+        },
+        disabled=["id", "name", "registered"], 
+        num_rows="dynamic", # Allows adding/deleting.
+        key="judges_editor",
+        hide_index=True,
+    )
+  
+    if st.button("Save Changes", type="primary"):
+        # st.data_editor state is stored in st.session_state["judges_editor"]
+        # It contains: {"added_rows": [], "deleted_rows": [], "edited_rows": {}}  
+        changes = st.session_state["judges_editor"]
+
+        if changes["added_rows"]:
+             st.warning("Please add new Judges in ACRO and then import here via the 'Acro Import' tab (CTX file). Manual addition is disabled here.")
+
+        # deleted_rows is a list of indices (integers) from the ORIGINAL dataframe
+        if changes["deleted_rows"]:
+            for index in changes["deleted_rows"]:
+                judge_to_del = df.iloc[index] # type: ignore
+                judge_id = int(judge_to_del["id"]) # type: ignore
+                
+                success, msg = app_ctrl.db.delete_judge(judge_id)
+                if success:
+                    st.toast(msg, icon="🗑️")
+                else:
+                    st.error(msg)
+
+        # edited_rows is a dict: {row_index: {"col_name": "new_value"}}
+        if changes["edited_rows"]:
+            for index, updates in changes["edited_rows"].items():
+                if "email" in updates:
+                    new_email = updates["email"]
+                    judge_row = df.iloc[index] # type: ignore
+                    judge_id = int(judge_row["id"]) # type: ignore
+                    
+                    try:
+                        valid_email = dm.UserBase.clean_email(new_email)
+                        success, msg = app_ctrl.db.update_judge_email(judge_id, valid_email)
+                        if success:
+                            st.toast(msg, icon="✅")
+                        else:
+                            st.error(msg)
+                    except Exception as e:
+                         st.error(f"Invalid email format for Judge ID {judge_id}: {e}")
+
+        # Reload to reflect changes
+        st.rerun()
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -84,8 +160,8 @@ if app_ctrl.is_user_logged_in():
     with tab_import:
         render_import_page()
     with tab_judges:
-        #render_judges_page()
-        pass
+        render_judges_page()
+        
 
 elif app_ctrl.is_comp_setup():
     assert app_ctrl.db is not None
