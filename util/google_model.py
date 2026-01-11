@@ -217,6 +217,16 @@ class SheetDB:
                 self._users_ws.delete_rows(cell.row)
         except Exception as e:
             raise Exception(f"Failed to delete user row: {e}")
+        
+    def update_admin_user_id(self, email: str, new_id: int):
+        try:
+            email_col = self._users_headers.index("email") + 1
+            cell = self._users_ws.find(email, in_column=email_col) # type: ignore
+            if cell:
+                id_col = self._users_headers.index("id") + 1
+                self._users_ws.update_cell(cell.row, id_col, new_id)
+        except Exception as e:
+            raise Exception(f"Failed to link Admin user {email} to Judge ID {new_id}: {e}")
 
     def authenticate_user(self, email: str, password: str) -> dm.User:
         try:
@@ -387,7 +397,7 @@ class SheetDB:
             self._judges_ws.delete_rows(cell.row)
             return True, f"Deleted Judge {judge_id}."
         except Exception as e:
-            return False, f"Error deleting judge: {e}"
+            return False, f"Error deleting judge {judge_id}: {e}"
 
     def update_judge_email(self, judge_id: int, new_email: str) -> Tuple[bool, str]:
         try:
@@ -410,7 +420,7 @@ class SheetDB:
                     user = self.get_user_by_email(old_email)
                     if user:
                         self._delete_user_row(old_email)
-                        return True, f"Updated Judge {judge_id} email. Deleted old User account for {old_email}."
+                        return True, f"Updated Judge {judge_id} email to {new_email}. Deleted old User account for {old_email}."
                 except UserEmailNotFound:
                     pass
 
@@ -418,3 +428,4 @@ class SheetDB:
 
         except Exception as e:
             return False, f"Error updating judge email: {e}"
+

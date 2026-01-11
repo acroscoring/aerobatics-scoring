@@ -6,6 +6,8 @@ from util.acro_parser import CtxParser
 from typing import Tuple, List, Dict, Any
 import pandas as pd
 import util.data_model as dm
+import time
+import util.streamlit_model as sm
 
 app_ctrl = load(title="⚙️ Administration")
 
@@ -72,80 +74,132 @@ def render_import_page():
             st.success("Database successfully updated from CTX file.")
 
 def render_judges_page():
-    st.markdown("Manage the Judges list and their emails. If you update an email, the existing User account (if any) will be reset.")
+    st.text("Manage the Judges list and their emails. If you update an email, the existing User account (if any) will be reset.")
 
     assert app_ctrl.db is not None
     all_judges = app_ctrl.db.get_all_judges()
     all_users = app_ctrl.db.get_all_users()
 
-    user_map = {u.id: u for u in all_users if u.role == "judge"}
+    # Check for Admins with blank User ID
+    judge_email_map = {dm.UserBase.clean_email(j.email): j.id for j in all_judges if j.email}
+
+    for user in all_users:
+        if user.role == "admin" and user.id == "" and user.email in judge_email_map:
+            match_judge_id = judge_email_map[user.email]
+            
+            try:
+                app_ctrl.db.update_admin_user_id(user.email, match_judge_id)
+                st.toast(f"Linked Admin {user.username} to Judge ID {match_judge_id}", icon="🔗")
+            except Exception as e:
+                st.error(f"Error linking admin: {e}")
+                return
+            
+            user.id = match_judge_id
+
+    # Build DF table
+    user_map = {u.id: u for u in all_users if (u.role == "judge" or u.role == "admin") and u.id != ""}
 
     table_data: List[Dict[str, Any]] = []
     for j in all_judges:
-        is_registered = j.id in user_map
+        user = user_map.get(j.id)
+        is_registered = user is not None
+        is_admin = (user.role == "admin") if user else False
         table_data.append({
             "id": j.id,
             "name": j.name,
             "email": j.email,
-            "registered": is_registered
+            "registered": is_registered,
+            "is_admin": is_admin
         })
     df = pd.DataFrame(table_data)
+
+    current_session_key = f"judges_editor_{sm.get_session_state_singleton("dynamic_table_session_key", lambda: 0)}"
     
     st.data_editor(
         df,
         column_config={
             "id": st.column_config.NumberColumn("ID", format="%d", disabled=True),
             "name": st.column_config.TextColumn("Judge Name", disabled=True),
-            "email": st.column_config.TextColumn("Email (Editable)"),
-            "registered": st.column_config.CheckboxColumn("User Registered?", disabled=True, help="A user was created in AeroScoring App using this email."),
+            "email": st.column_config.TextColumn("Email (Editable)", help="Add the Judge's email so it can register in the AeroScoring App."),
+            "registered": st.column_config.CheckboxColumn("Registered?", disabled=True, help="A user was created in AeroScoring App using this email."),
+            "is_admin": st.column_config.CheckboxColumn("Admin?", disabled=True, help="This user has Admin privileges."),
         },
-        disabled=["id", "name", "registered"], 
-        num_rows="dynamic", # Allows adding/deleting.
-        key="judges_editor",
+        disabled=["id", "name", "registered", "is_admin"], 
+        num_rows="dynamic",
+        key=current_session_key,
         hide_index=True,
     )
   
-    if st.button("Save Changes", type="primary"):
-        # st.data_editor state is stored in st.session_state["judges_editor"]
-        # It contains: {"added_rows": [], "deleted_rows": [], "edited_rows": {}}  
-        changes = st.session_state["judges_editor"]
+    status_area = st.container()
 
-        if changes["added_rows"]:
-             st.warning("Please add new Judges in ACRO and then import here via the 'Acro Import' tab (CTX file). Manual addition is disabled here.")
+    # --- Buttons ---
+    col_save, col_cancel = st.columns([1, 1])
 
-        # deleted_rows is a list of indices (integers) from the ORIGINAL dataframe
-        if changes["deleted_rows"]:
-            for index in changes["deleted_rows"]:
-                judge_to_del = df.iloc[index] # type: ignore
-                judge_id = int(judge_to_del["id"]) # type: ignore
-                
-                success, msg = app_ctrl.db.delete_judge(judge_id)
-                if success:
-                    st.toast(msg, icon="🗑️")
-                else:
-                    st.error(msg)
+    with col_cancel:
+        if st.button("Reset / Cancel", type="secondary", icon="⏪"):
+            sm.set_session_state("dynamic_table_session_key", sm.get_session_state("dynamic_table_session_key")+1)
+            st.rerun()
+        
+    with col_save:
+        if st.button("Save Changes", type="primary", icon="✅"):
+            # st.data_editor state is stored in st.session_state["judges_editor"]
+            # It contains: {"added_rows": [], "deleted_rows": [], "edited_rows": {}}  
+            changes = sm.get_session_state(current_session_key)
+            has_error = False
 
-        # edited_rows is a dict: {row_index: {"col_name": "new_value"}}
-        if changes["edited_rows"]:
-            for index, updates in changes["edited_rows"].items():
-                if "email" in updates:
-                    new_email = updates["email"]
-                    judge_row = df.iloc[index] # type: ignore
-                    judge_id = int(judge_row["id"]) # type: ignore
+            if changes["added_rows"]:
+                status_area.warning("Please add new Judges in ACRO and then import here via the 'Acro Import' tab (CTX file). Manual addition is disabled here.", icon="⚠️")
+                has_error = True
+
+            # deleted_rows is a list of indices (integers) from the ORIGINAL dataframe
+            if changes["deleted_rows"]:
+                for index in changes["deleted_rows"]:
+                    judge_to_del = df.iloc[index] # type: ignore
+                    judge_id = int(judge_to_del["id"]) # type: ignore
+
+                    if judge_to_del["is_admin"]:
+                        status_area.error(f"Cannot delete Judge {judge_id} ({judge_to_del["name"]}) because she/he is an Admin.", icon="🚫")
+                        has_error = True
+                        continue
                     
-                    try:
-                        valid_email = dm.UserBase.clean_email(new_email)
-                        success, msg = app_ctrl.db.update_judge_email(judge_id, valid_email)
-                        if success:
-                            st.toast(msg, icon="✅")
-                        else:
-                            st.error(msg)
-                    except Exception as e:
-                         st.error(f"Invalid email format for Judge ID {judge_id}: {e}")
+                    success, msg = app_ctrl.db.delete_judge(judge_id)
+                    if success:
+                        status_area.info(msg, icon="🗑️")
+                    else:
+                        status_area.error(msg, icon="❌")
+                        has_error = True
 
-        # Reload to reflect changes
-        st.rerun()
+            # edited_rows is a dict: {row_index: {"col_name": "new_value"}}
+            if changes["edited_rows"]:
+                for index, updates in changes["edited_rows"].items():
+                    if "email" in updates:
+                        new_email = updates["email"]
+                        judge_row = df.iloc[index] # type: ignore
+                        judge_id = int(judge_row["id"]) # type: ignore
 
+                        if judge_row["is_admin"]:
+                            status_area.error(f"Cannot alter Judge {judge_id} ({judge_row["name"]}) email because she/he is an Admin.", icon="🚫")
+                            has_error = True
+                            continue
+                        
+                        try:
+                            valid_email = dm.UserBase.clean_email(new_email)
+                            success, msg = app_ctrl.db.update_judge_email(judge_id, valid_email)
+                            if success:
+                                status_area.info(msg, icon="✅")
+                            else:
+                                status_area.error(msg, icon="❌")
+                                has_error = True
+                        except Exception as e:
+                            status_area.error(f"Invalid email format for Judge ID {judge_id} ({judge_row["name"]}): {e}", icon="❌")
+                            has_error = True
+
+            if has_error:
+                status_area.error("There were warnings/errors above. Please check them and when ready 'Reset / Cancel' so the table load with the latest data.", icon="👀")
+            else:
+                time.sleep(3)
+                sm.set_session_state("dynamic_table_session_key", sm.get_session_state("dynamic_table_session_key")+1)
+                st.rerun()
 
 # --------------------------------------------------------------------------------------------------------------
 # Main Page
