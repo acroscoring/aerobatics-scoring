@@ -1,7 +1,7 @@
 import streamlit as st
 from util.controller import Register
 from pages.header import load
-import util.messages as msg
+import util.constants as const
 
 app_ctrl = load(title="📝 Create User to Upload Scores")
 
@@ -30,5 +30,5 @@ if app_ctrl.is_comp_setup():
                 st.switch_page("comp")  
 
 else:
-    st.error(msg.ErrorMsgs.NO_COMP_FOUND, icon="❌")
-    st.error(msg.ErrorMsgs.NO_JUDGE_ID, icon="❌")
+    st.error(const.ErrorMsgs.NO_COMP_FOUND, icon="❌")
+    st.error(const.ErrorMsgs.NO_JUDGE_ID, icon="❌")

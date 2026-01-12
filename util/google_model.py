@@ -11,6 +11,7 @@ import util.data_model as dm
 import util.security_model as sec
 from gspread_dataframe import set_with_dataframe, get_as_dataframe # type: ignore
 import pandas as pd
+import util.constants as const
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -48,8 +49,6 @@ class EmailResponse(BaseModel):
     status: Literal["Success", "Error"]
     message: str | None = None
 
-ApiRequest = CompetitionRequest | EmailRequest
-ApiResponse = CompetitionResponse | EmailResponse
 
 class DatabaseConnectionError(Exception):
     pass
@@ -115,12 +114,12 @@ class SheetDB:
                 raise DatabaseConnectionError(f"Competition not found ({sheet_id})")
 
             self.title = self._sheet.title
-            self._users_ws = self._sheet.worksheet("Users")
+            self._users_ws = self._sheet.worksheet(const.DBTabs.USERS)
             self._users_headers = self._users_ws.row_values(1)
             if not self._users_headers:
                 raise DatabaseConnectionError("Users tab headers row missing")
             
-            self._judges_ws = self._sheet.worksheet("Judges")
+            self._judges_ws = self._sheet.worksheet(const.DBTabs.JUDGES)
             self._judges_headers = self._judges_ws.row_values(1)
             if not self._judges_headers:
                 raise DatabaseConnectionError("Judges tab headers row missing")
@@ -310,7 +309,7 @@ class SheetDB:
     
     def upsert_mark(self, mark: dm.AcroMark) -> Tuple[bool, str]:
         try:
-            ws = self._sheet.worksheet("Marks")
+            ws = self._sheet.worksheet(const.DBTabs.MARKS)
 
             # "Blank Sheet"
             model_data = mark.model_dump()
@@ -406,6 +405,20 @@ class SheetDB:
             
             if old_email == new_email:
                 return True, "No change."
+            
+            all_judges = self.get_all_judges()
+            for j in all_judges:
+                if j.id != judge_id and j.email and j.email == new_email:
+                    return False, f"Email '{new_email}' is already assigned to Judge {j.id} ({j.name})."
+                
+            try:
+                existing_user = self.get_user_by_email(new_email)
+                is_same_person = (existing_user.role == "judge" and existing_user.id == judge_id)
+                if not is_same_person:
+                    return False, f"Email '{new_email}' is already registered to another User ({existing_user.username})."
+            
+            except UserEmailNotFound:
+                pass
 
             id_col = self._judges_headers.index("id") + 1
             cell = self._judges_ws.find(str(judge_id), in_column=id_col) # type: ignore
@@ -428,4 +441,83 @@ class SheetDB:
 
         except Exception as e:
             return False, f"Error updating judge email: {e}"
+
+    def _call_email_api(self, payload: EmailPayload) -> Tuple[bool, str]:
+        try:
+            api_request = EmailRequest(
+                api_name="SEND_EMAIL",
+                api_secret=secrets["google_app_script"]["api_secret"],
+                payload=payload
+            )
+            
+            api_url: str = secrets["google_app_script"]["prod_url"] if secrets["env"]["type"] == "prod" else secrets["google_app_script"]["dev_url"]
+            response = requests.post(api_url, json=api_request.model_dump(mode='json'))
+            
+            if response.status_code != 200:
+                return False, f"HTTP Error: {response.status_code} - {response.text}"
+            
+            result = EmailResponse(**response.json())
+            
+            if result.status == "Success":
+                return True, "Email sent successfully"
+            else:
+                return False, f"Send email error: {result.message}"
+                
+        except Exception as e:
+            return False, f"Send email failed: {e}"
+    
+    def send_judge_invite(self, judge: dm.Judge, admin_user: dm.AuthUser) -> Tuple[bool, str]:
+        try:
+            if not judge.email:
+                return False, f"Judge {judge.name} ({judge.id}) has no email."
+            
+            base_url = str(context.url).rstrip("/")
+            reg_url = f"{base_url}/register?comp_id={self.id}&judge_id={judge.id}"
+            app_url = f"{base_url}/comp?comp_id={self.id}"
+
+            html_content = f"""
+            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
+                <h2 style="color: #2E86C1;">✈️ Invitation to {self.title}</h2>
+                <p>Hi <strong>{judge.name}</strong>,</p>
+                <p><strong>{admin_user.username}</strong> has invited you to join the <b>AeroScoring</b> app for this competition.</p>
+                <p>We are using AI to make scoring faster and easier. You simply take a photo of your score sheet, and the app does the rest!</p>
+                
+                <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+                
+                <h3>Step 1: Register</h3>
+                <p>Please register your account for this specific competition (Comp ID: {self.title}) by clicking the button below:</p>
+                <p style="text-align: center;">
+                    <a href="{reg_url}" style="background-color: #28B463; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+                        📝 Register Now
+                    </a>
+                </p>
+                
+                <h3>Step 2: Submit Scores</h3>
+                <p>Once registered, use the link below during the competition to scan your sheets:</p>
+                <p style="text-align: center;">
+                    <a href="{app_url}" style="background-color: #2E86C1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
+                        🏆 Open Scoring App
+                    </a>
+                </p>
+                
+                <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+                <p style="font-size: 12px; color: #888;">
+                    <strong>Tip:</strong> Keep this email handy so you can quickly access the links during the competition day.<br>
+                </p>
+            </div>
+            """
+
+            payload = EmailPayload(
+                recipient=judge.email,
+                copy_to=admin_user.email,
+                subject=f"Invitation: {self.title} Scoring App",
+                htmlBody=html_content
+            )
+
+            return self._call_email_api(payload)
+
+        except Exception as e:
+            return False, f"Error preparing email for {judge.name}: {e}"
+
+    
 

@@ -8,7 +8,7 @@ from PIL.Image import Image
 from pandas import DataFrame
 import uuid
 from streamlit_cookies_manager import CookieManager # type: ignore
-import util.messages as msg
+import util.constants as const
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -253,7 +253,7 @@ class Register:
                 assert self.app_ctrl.db is not None
                 self.db = self.app_ctrl.db
             else:
-                raise Exception(msg.ErrorMsgs.NO_COMP_FOUND)
+                raise Exception(const.ErrorMsgs.NO_COMP_FOUND)
             
             judge_id = Register._get_judge_id_from_query_params()
             self.judge_details = self.db.get_judge_details(judge_id)
@@ -282,7 +282,7 @@ class Register:
         judge_id = st.query_params.get("judge_id")
         
         if not judge_id:
-            raise MissingJudgeId(msg.ErrorMsgs.NO_JUDGE_ID)
+            raise MissingJudgeId(const.ErrorMsgs.NO_JUDGE_ID)
 
         return int(judge_id)
 
@@ -299,10 +299,10 @@ class CompScoreSheetAi:
                 assert self.app_ctrl.db is not None
                 self.db = self.app_ctrl.db
             else:
-                raise Exception(msg.ErrorMsgs.NO_COMP_FOUND)
+                raise Exception(const.ErrorMsgs.NO_COMP_FOUND)
             
             if not self.app_ctrl.is_user_logged_in():
-                raise Exception(msg.ErrorMsgs.LOGIN_TO_MNG_COMP)
+                raise Exception(const.ErrorMsgs.LOGIN_TO_MNG_COMP)
             else:
                 self.auth_user = self.app_ctrl.auth_user
         except Exception as e:

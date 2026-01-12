@@ -1,6 +1,6 @@
 import streamlit as st
 from pages.header import load
-import util.messages as msg
+import util.constants as const
 from io import StringIO
 from util.acro_parser import CtxParser
 from typing import Tuple, List, Dict, Any
@@ -8,6 +8,7 @@ import pandas as pd
 import util.data_model as dm
 import time
 import util.streamlit_model as sm
+from pydantic import EmailStr
 
 app_ctrl = load(title="⚙️ Administration")
 
@@ -19,6 +20,8 @@ def render_import_page():
     st.markdown("Upload the competition's `.ctx` file to define Judges, Pilots and Sequences.")
 
     uploaded_file = st.file_uploader("Choose a CTX file", type="ctx")
+
+    Tabs = const.DBTabs
 
     if uploaded_file is not None:
         # 1. Read File
@@ -64,21 +67,32 @@ def render_import_page():
             # ------- Save CTX File -------
             status_area.text("Saving ACRO File...")
             df_raw = parser.raw_file_to_df(file_content)
-            if not render_error_or_progress(60, app_ctrl.db.update_tab_from_df("ACRO File", df_raw)): return
-            if not render_error_or_progress(70, app_ctrl.db.update_tab_from_df("ACRO Judges", df_judges)): return
-            if not render_error_or_progress(80, app_ctrl.db.update_tab_from_df("ACRO Pilots", df_pilots)): return
-            if not render_error_or_progress(90, app_ctrl.db.update_tab_from_df("ACRO Sequences", df_sequences)): return
-            if not render_error_or_progress(100, app_ctrl.db.update_tab_from_df("ACRO Marks", df_marks)): return
+            if not render_error_or_progress(60, app_ctrl.db.update_tab_from_df(Tabs.ACRO_FILE, df_raw)): return
+            if not render_error_or_progress(70, app_ctrl.db.update_tab_from_df(Tabs.ACRO_JUDGES, df_judges)): return
+            if not render_error_or_progress(80, app_ctrl.db.update_tab_from_df(Tabs.ACRO_PILOTS, df_pilots)): return
+            if not render_error_or_progress(90, app_ctrl.db.update_tab_from_df(Tabs.ACRO_SEQUENCES, df_sequences)): return
+            if not render_error_or_progress(100, app_ctrl.db.update_tab_from_df(Tabs.ACRO_MARKS, df_marks)): return
 
             status_area.text("Done!")
             st.success("Database successfully updated from CTX file.")
 
 def render_judges_page():
-    st.text("Manage the Judges list and their emails. If you update an email, the existing User account (if any) will be reset.")
+    st.markdown("""
+                ##### Add the Judges email and invite them to use the AeroScore App.
+                
+                1. Add each judge's email and **save**.
+                    - You can update the email in case of mistake, but if there is a AeroScore App user with that incorrect email then it will be deleted.
+                2. Select the judges you want to send the invite email (for them to register and be able to use the AeroScore App).
+                """)
+    st.divider()
 
     assert app_ctrl.db is not None
+    assert app_ctrl.auth_user is not None
     all_judges = app_ctrl.db.get_all_judges()
     all_users = app_ctrl.db.get_all_users()
+
+    Tbl = dm.JudgeTableRow 
+    Cols = Tbl.Cols
 
     # Check for Admins with blank User ID
     judge_email_map = {dm.UserBase.clean_email(j.email): j.id for j in all_judges if j.email}
@@ -98,50 +112,95 @@ def render_judges_page():
 
     # Build DF table
     user_map = {u.id: u for u in all_users if (u.role == "judge" or u.role == "admin") and u.id != ""}
+    
+    sm.get_session_state_singleton("judge_selection", lambda: set[int])
 
     table_data: List[Dict[str, Any]] = []
     for j in all_judges:
         user = user_map.get(j.id)
-        is_registered = user is not None
-        is_admin = (user.role == "admin") if user else False
-        table_data.append({
-            "id": j.id,
-            "name": j.name,
-            "email": j.email,
-            "registered": is_registered,
-            "is_admin": is_admin
-        })
+        table_row = Tbl(
+            id=j.id,
+            name=j.name,
+            email=j.email,
+            registered=(user is not None),
+            is_admin=((user.role == "admin") if user else False),
+            selected=(j.id in sm.get_session_state("judge_selection"))
+        )
+        table_data.append(table_row.to_row())
+    
     df = pd.DataFrame(table_data)
+
+    if st.button("Select All Unregistered", help="Selects all judges who haven't registered yet.", type="secondary"):
+        unreg_ids = {j.id for j in all_judges if j.id not in user_map}
+        sm.set_session_state("judge_selection", unreg_ids)
+        st.rerun()
 
     current_session_key = f"judges_editor_{sm.get_session_state_singleton("dynamic_table_session_key", lambda: 0)}"
     
-    st.data_editor(
+    edited_df = st.data_editor(
         df,
         column_config={
-            "id": st.column_config.NumberColumn("ID", format="%d", disabled=True),
-            "name": st.column_config.TextColumn("Judge Name", disabled=True),
-            "email": st.column_config.TextColumn("Email (Editable)", help="Add the Judge's email so it can register in the AeroScoring App."),
-            "registered": st.column_config.CheckboxColumn("Registered?", disabled=True, help="A user was created in AeroScoring App using this email."),
-            "is_admin": st.column_config.CheckboxColumn("Admin?", disabled=True, help="This user has Admin privileges."),
+            Cols.SELECTED: st.column_config.CheckboxColumn("Invite", help="Select to send email to the judge so she/he can register in AeroScore App"),
+            Cols.ID: st.column_config.NumberColumn("ID", format="%d", disabled=True, help="ID for ACRO Scoring", width=30),
+            Cols.NAME: st.column_config.TextColumn("Judge Name", disabled=True, help="Name for ACRO Scoring", width="medium"),
+            Cols.EMAIL: st.column_config.TextColumn("Email (Editable)", help="Add the Judge's email so it can register in the AeroScoring App", width="medium"),
+            Cols.REGISTERED: st.column_config.CheckboxColumn("User?", disabled=True, help="A user was created in AeroScoring App using this email (the judge registered)"),
+            Cols.IS_ADMIN: st.column_config.CheckboxColumn("Admin?", disabled=True, help="This user has Admin privileges"),
         },
-        disabled=["id", "name", "registered", "is_admin"], 
+        disabled=[Cols.ID, Cols.NAME, Cols.REGISTERED, Cols.IS_ADMIN], 
         num_rows="dynamic",
         key=current_session_key,
         hide_index=True,
     )
+
+    current_selected_ids = set(edited_df[edited_df[Cols.SELECTED] == True][Cols.ID].tolist())
+    sm.set_session_state("judge_selection", current_selected_ids)
   
     status_area = st.container()
 
     # --- Buttons ---
-    col_save, col_cancel = st.columns([1, 1])
+    col_save, col_email, col_cancel = st.columns([1, 1, 1])
 
     with col_cancel:
         if st.button("Reset / Cancel", type="secondary", icon="⏪"):
+            sm.set_session_state("judge_selection", set[int])
             sm.set_session_state("dynamic_table_session_key", sm.get_session_state("dynamic_table_session_key")+1)
             st.rerun()
         
+    with col_email:
+        num_selected = len(current_selected_ids)
+        if st.button(f"Send Invite ({num_selected})", type="primary", icon="📧", disabled=(num_selected==0), help="Remember to save any chnage before sending the emails."):
+            
+            progress_text = "Sending emails..."
+            progress_bar = status_area.progress(0, text=progress_text)
+            
+            targets = [j for j in all_judges if j.id in current_selected_ids]
+            
+            success_count = 0
+            for i, judge in enumerate(targets):
+                progress = int(((i + 1) / len(targets)) * 100)
+                progress_bar.progress(progress, text=f"Sending to {judge.name}...")
+                
+                if not judge.email:
+                    status_area.warning(f"Skipped {judge.name} (ID {judge.id}): No email address.", icon="⚠️")
+                    continue
+                
+                ok, msg = app_ctrl.db.send_judge_invite(judge, app_ctrl.auth_user)
+                if ok:
+                    success_count += 1
+                else:
+                    status_area.error(f"Failed to send to {judge.name}: {msg}", icon="❌")
+            
+            progress_bar.empty()
+            if success_count > 0:
+                status_area.success(f"Successfully sent {success_count} invitation emails!", icon="✅")
+                time.sleep(3)
+                sm.set_session_state("judge_selection", set[int])
+                sm.set_session_state("dynamic_table_session_key", sm.get_session_state("dynamic_table_session_key")+1)
+                st.rerun()
+
     with col_save:
-        if st.button("Save Changes", type="primary", icon="✅"):
+        if st.button("Save Changes", type="primary", icon="💾"):
             # st.data_editor state is stored in st.session_state["judges_editor"]
             # It contains: {"added_rows": [], "deleted_rows": [], "edited_rows": {}}  
             changes = sm.get_session_state(current_session_key)
@@ -155,10 +214,10 @@ def render_judges_page():
             if changes["deleted_rows"]:
                 for index in changes["deleted_rows"]:
                     judge_to_del = df.iloc[index] # type: ignore
-                    judge_id = int(judge_to_del["id"]) # type: ignore
+                    judge_id = int(judge_to_del[Cols.ID]) # type: ignore
 
-                    if judge_to_del["is_admin"]:
-                        status_area.error(f"Cannot delete Judge {judge_id} ({judge_to_del["name"]}) because she/he is an Admin.", icon="🚫")
+                    if judge_to_del[Cols.IS_ADMIN]:
+                        status_area.error(f"Cannot delete Judge {judge_id} ({judge_to_del[Cols.NAME]}) because she/he is an Admin.", icon="🚫")
                         has_error = True
                         continue
                     
@@ -171,33 +230,40 @@ def render_judges_page():
 
             # edited_rows is a dict: {row_index: {"col_name": "new_value"}}
             if changes["edited_rows"]:
+                emails_used: set[EmailStr] = set()
                 for index, updates in changes["edited_rows"].items():
-                    if "email" in updates:
-                        new_email = updates["email"]
+                    if Cols.EMAIL in updates:
+                        new_email = dm.UserBase.clean_email(updates[Cols.EMAIL])
+                        if new_email in emails_used:
+                            status_area.error(f"Email {new_email} is duplicated.", icon="🚫")
+                            has_error = True
+                            continue
+                        
+                        emails_used.add(new_email)
                         judge_row = df.iloc[index] # type: ignore
-                        judge_id = int(judge_row["id"]) # type: ignore
+                        judge_id = int(judge_row[Cols.ID]) # type: ignore
 
-                        if judge_row["is_admin"]:
-                            status_area.error(f"Cannot alter Judge {judge_id} ({judge_row["name"]}) email because she/he is an Admin.", icon="🚫")
+                        if judge_row[Cols.IS_ADMIN]:
+                            status_area.error(f"Cannot alter Judge {judge_id} ({judge_row[Cols.NAME]}) email because she/he is an Admin.", icon="🚫")
                             has_error = True
                             continue
                         
                         try:
-                            valid_email = dm.UserBase.clean_email(new_email)
-                            success, msg = app_ctrl.db.update_judge_email(judge_id, valid_email)
+                            success, msg = app_ctrl.db.update_judge_email(judge_id, new_email)
                             if success:
                                 status_area.info(msg, icon="✅")
                             else:
                                 status_area.error(msg, icon="❌")
                                 has_error = True
                         except Exception as e:
-                            status_area.error(f"Invalid email format for Judge ID {judge_id} ({judge_row["name"]}): {e}", icon="❌")
+                            status_area.error(f"Invalid email format for Judge ID {judge_id} ({judge_row[Cols.NAME]}): {e}", icon="❌")
                             has_error = True
 
             if has_error:
                 status_area.error("There were warnings/errors above. Please check them and when ready 'Reset / Cancel' so the table load with the latest data.", icon="👀")
             else:
                 time.sleep(3)
+                sm.set_session_state("judge_selection", set[int])
                 sm.set_session_state("dynamic_table_session_key", sm.get_session_state("dynamic_table_session_key")+1)
                 st.rerun()
 
@@ -220,7 +286,7 @@ if app_ctrl.is_user_logged_in():
 elif app_ctrl.is_comp_setup():
     assert app_ctrl.db is not None
     st.header(app_ctrl.db.title)
-    st.error(msg.ErrorMsgs.LOGIN_TO_MNG_COMP, icon="❌")
+    st.error(const.ErrorMsgs.LOGIN_TO_MNG_COMP, icon="❌")
     st.info("Logout of the competition to create a new competition (or reload the page).", icon="ℹ️")
 
 else:

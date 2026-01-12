@@ -294,3 +294,24 @@ class AcroMark(BaseModel):
             **oaks,
             **pens
         )
+    
+class JudgeTableRow(BaseModel):
+    class Cols:
+        SELECTED = "selected"
+        ID = "id"
+        NAME = "name"
+        EMAIL = "email"
+        REGISTERED = "registered"
+        IS_ADMIN = "is_admin"
+
+    selected: bool = Field(default=False, alias=Cols.SELECTED)
+    id: int = Field(alias=Cols.ID)
+    name: str = Field(alias=Cols.NAME)
+    email: str | None = Field(alias=Cols.EMAIL) 
+    registered: bool = Field(alias=Cols.REGISTERED)
+    is_admin: bool = Field(alias=Cols.IS_ADMIN)
+    
+    model_config = ConfigDict(populate_by_name=True)
+
+    def to_row(self) -> Dict[str, Any]:
+        return self.model_dump(by_alias=True)

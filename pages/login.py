@@ -1,6 +1,6 @@
 import streamlit as st
 from pages.header import load
-import util.messages as msg
+import util.constants as const
 
 app_ctrl = load(title="🔐 AeroScoring Login")
 
@@ -32,5 +32,5 @@ elif app_ctrl.is_comp_setup():
         if st.button("Send New Password", type="primary", key="send_bt", icon="👋", help=f"Will send a new password to your email (if the email exists in this competition)"):
             app_ctrl.forgot_password(email)
 else:
-    st.error(msg.ErrorMsgs.NO_COMP_FOUND, icon="❌")
+    st.error(const.ErrorMsgs.NO_COMP_FOUND, icon="❌")
 
