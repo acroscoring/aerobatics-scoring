@@ -95,6 +95,9 @@ def _get_genai_client(api_key: str):
         return genai.Client(api_key=api_key)
     except Exception as e:
         raise AiConnectionError(f"AI Authentication Failed: {e}")
+    
+def _get_google_app_script_url() -> str:
+    return secrets["google_app_script"]["prod_url"] if secrets["env"]["type"] == "prod" else secrets["google_app_script"]["dev_url"]
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -143,7 +146,7 @@ class SheetDB:
                 comp_name = comp_name,
                 admin_email = admin_email,
                 bot_email = secrets["gcp_service_account"]["client_email"],
-                app_url = HttpUrl(context.url), # no query parameters
+                app_url = HttpUrl(context.url),
             )
 
             api_request = CompetitionRequest(
@@ -152,7 +155,7 @@ class SheetDB:
                 payload=payload
             )
             
-            api_url: str = secrets["google_app_script"]["prod_url"] if secrets["env"]["type"] == "prod" else secrets["google_app_script"]["dev_url"]
+            api_url: str = _get_google_app_script_url()
             response = requests.post(api_url, json=api_request.model_dump(mode='json'))
             
             if response.status_code != 200:
@@ -359,12 +362,26 @@ class SheetDB:
             if extra_ids:
                 return False, f"Validation Error: The AeroScoring App Judges list has IDs {extra_ids} which are missing from the AcroScoring uploaded ctx file. Please update the legacy ACRO system to include these judges or remove them from the AeroScoring App Judges tab manually."
 
+            process_status: List[str] = []
+            common_ids = current_ids.intersection(acro_ids)
+            if common_ids:                
+                common_df = df_acro_judges[df_acro_judges['id'].isin(common_ids)] # type: ignore
+                records = cast(List[Dict[str, Any]], common_df.to_dict('records')) # type: ignore
+                
+                for record in records:
+                    acro_judge = dm.AcroJudge(**record)
+                    ok, msg = self.update_judge_name(acro_judge)
+                    if not ok:
+                        return False, f"Update judge name error: {msg}"
+                
+                process_status.append(f"Updated judge names.")
+            
             missing_ids = acro_ids - current_ids
             if missing_ids:
                 new_judges_rows: List[List[Any]] = []
                 
                 missing_df = df_acro_judges[df_acro_judges['id'].isin(missing_ids)] # type: ignore
-                records =cast(List[Dict[str, Any]], missing_df.to_dict('records')) # type: ignore
+                records = cast(List[Dict[str, Any]], missing_df.to_dict('records')) # type: ignore
                 
                 for record in records:
                     acro_judge = dm.AcroJudge(**record)
@@ -373,12 +390,14 @@ class SheetDB:
 
                 if new_judges_rows:
                     self._judges_ws.append_rows(new_judges_rows)
-                    return True, f"Synced Judges: Added {len(new_judges_rows)} new judges."
+                    process_status.append(f"Added {len(new_judges_rows)} new judges.")
 
-            return True, "Judges validation passed. No changes needed."
-
+            if len(process_status) > 0:
+                return True, " ".join(process_status)
+            else:
+                return True, "No judge updates needed."
         except Exception as e:
-            return False, f"Judge Sync Error: {e}"
+            return False, f"Judge sync error: {e}"
         
     def delete_judge(self, judge_id: int) -> Tuple[bool, str]:
         try:
@@ -402,14 +421,15 @@ class SheetDB:
         try:
             judge = self.get_judge_details(judge_id)
             old_email = judge.email
+            new_email = dm.Judge.clean_email(new_email)
             
             if old_email == new_email:
-                return True, "No change."
+                return True, f"{judge.name} ({judge.id}) no change on email."
             
             all_judges = self.get_all_judges()
             for j in all_judges:
                 if j.id != judge_id and j.email and j.email == new_email:
-                    return False, f"Email '{new_email}' is already assigned to Judge {j.id} ({j.name})."
+                    return False, f"Email '{new_email}' is already assigned to Judge {j.name} ({j.id})."
                 
             try:
                 existing_user = self.get_user_by_email(new_email)
@@ -423,7 +443,7 @@ class SheetDB:
             id_col = self._judges_headers.index("id") + 1
             cell = self._judges_ws.find(str(judge_id), in_column=id_col) # type: ignore
             if not cell:
-                return False, f"Judge ID {judge_id} not found in sheet."
+                return False, f"Judge ID {judge_id} not found in DB."
             
             email_col = self._judges_headers.index("email") + 1
             self._judges_ws.update_cell(cell.row, email_col, new_email)
@@ -433,14 +453,36 @@ class SheetDB:
                     user = self.get_user_by_email(old_email)
                     if user:
                         self._delete_user_row(old_email)
-                        return True, f"Updated Judge {judge_id} email to {new_email}. Deleted old User account for {old_email}."
+                        return True, f"Updated Judge {judge.name} ({judge_id}) email to {new_email}. Deleted User account on old email {old_email}."
                 except UserEmailNotFound:
                     pass
 
-            return True, f"Updated Judge {judge_id} email to {new_email}."
+            return True, f"Updated Judge {judge.name} ({judge_id}) email to {new_email}."
 
         except Exception as e:
             return False, f"Error updating judge email: {e}"
+    
+    def update_judge_name(self, new_judge: dm.AcroJudge) -> Tuple[bool, str]:
+        try:
+            old_judge = self.get_judge_details(new_judge.id)
+            new_name = dm.Judge.full_name_from_acro_judge(new_judge)
+
+            if old_judge.name == new_name:
+                return True, f"No name update required on {old_judge.name}."
+
+            id_col = self._judges_headers.index("id") + 1
+            cell = self._judges_ws.find(str(new_judge.id), in_column=id_col) # type: ignore
+            if not cell:
+                return False, f"Judge ID {new_judge.id} not found in DB."
+            
+            old_judge.name = new_name
+
+            # Assume the sheet columns match the model field order exactly.
+            row_values = list(old_judge.model_dump().values())
+            self._judges_ws.update(range_name=f"A{cell.row}", values=[row_values])
+            return True, f"Updated Judge name {old_judge.name}."
+        except Exception as e:
+            return False, f"Error updating judge name: {e}"
 
     def _call_email_api(self, payload: EmailPayload) -> Tuple[bool, str]:
         try:
@@ -450,7 +492,7 @@ class SheetDB:
                 payload=payload
             )
             
-            api_url: str = secrets["google_app_script"]["prod_url"] if secrets["env"]["type"] == "prod" else secrets["google_app_script"]["dev_url"]
+            api_url: str = _get_google_app_script_url()
             response = requests.post(api_url, json=api_request.model_dump(mode='json'))
             
             if response.status_code != 200:
@@ -471,7 +513,8 @@ class SheetDB:
             if not judge.email:
                 return False, f"Judge {judge.name} ({judge.id}) has no email."
             
-            base_url = str(context.url).rstrip("/")
+            base_url = HttpUrl(str(context.url))
+            base_url = f"{base_url.scheme}://{base_url.host}"
             reg_url = f"{base_url}/register?comp_id={self.id}&judge_id={judge.id}"
             app_url = f"{base_url}/comp?comp_id={self.id}"
 
@@ -485,20 +528,26 @@ class SheetDB:
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
                 
                 <h3>Step 1: Register</h3>
-                <p>Please register your account for this specific competition (Comp ID: {self.title}) by clicking the button below:</p>
+                <p>Please register your account for this specific competition (Comp Name: {self.title}) by clicking the button below:</p>
+                <br>
                 <p style="text-align: center;">
                     <a href="{reg_url}" style="background-color: #28B463; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
                         📝 Register Now
                     </a>
                 </p>
+
+                <br>
                 
                 <h3>Step 2: Submit Scores</h3>
                 <p>Once registered, use the link below during the competition to scan your sheets:</p>
+                <br>
                 <p style="text-align: center;">
                     <a href="{app_url}" style="background-color: #2E86C1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">
                         🏆 Open Scoring App
                     </a>
                 </p>
+
+                <br>
                 
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
                 <p style="font-size: 12px; color: #888;">

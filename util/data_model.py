@@ -101,12 +101,14 @@ class Judge(BaseModel):
         return cls(**record)
     
     @classmethod
-    def from_acro_judge(cls, acro_judge: AcroJudge) -> "Judge":
-        full_name = f"{acro_judge.first_name} {acro_judge.surname}"
-        
+    def full_name_from_acro_judge(cls, acro_judge: AcroJudge) -> str:
+        return f"{acro_judge.first_name} {acro_judge.surname}"
+
+    @classmethod
+    def from_acro_judge(cls, acro_judge: AcroJudge) -> "Judge":    
         new_judge = Judge(
             id=acro_judge.id,
-            name=full_name,
+            name=Judge.full_name_from_acro_judge(acro_judge),
             email=""
         )
         return new_judge
@@ -117,6 +119,11 @@ class Judge(BaseModel):
         if (id < 1) or (id > 99):
             raise ValueError("Invalid judge ID (should be between 01 and 99).")
         return id
+    
+    @field_validator('email')
+    @classmethod
+    def clean_email(cls, email: str) -> str:
+        return User.clean_email(email)
 
 
 

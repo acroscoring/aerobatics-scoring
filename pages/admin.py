@@ -8,7 +8,6 @@ import pandas as pd
 import util.data_model as dm
 import time
 import util.streamlit_model as sm
-from pydantic import EmailStr
 
 app_ctrl = load(title="⚙️ Administration")
 
@@ -45,12 +44,13 @@ def render_import_page():
             st.write("### Sequences", df_sequences.head())
             st.write("### Marks", df_marks.head())
 
+        status_area = st.container()
+        progress_bar = status_area.progress(0)
+
         # 3. Update Action
         if st.button("Confirm Update", type="primary", icon="🚀"):
             assert app_ctrl.db is not None
-            progress_bar = st.progress(0)
-            status_area = st.empty()
-
+            
             def render_error_or_progress(progress_value: int, process_tuple: Tuple[bool, str]) -> bool:
                 success, msg = process_tuple
                 if not success:
@@ -60,12 +60,10 @@ def render_import_page():
                 return True
 
             # ------- Sync CTX File & App -------
-            status_area.text("Syncing Data...")
             if not render_error_or_progress(10, app_ctrl.db.sync_acro_judges(df_judges)): return
 
 
             # ------- Save CTX File -------
-            status_area.text("Saving ACRO File...")
             df_raw = parser.raw_file_to_df(file_content)
             if not render_error_or_progress(60, app_ctrl.db.update_tab_from_df(Tabs.ACRO_FILE, df_raw)): return
             if not render_error_or_progress(70, app_ctrl.db.update_tab_from_df(Tabs.ACRO_JUDGES, df_judges)): return
@@ -73,8 +71,8 @@ def render_import_page():
             if not render_error_or_progress(90, app_ctrl.db.update_tab_from_df(Tabs.ACRO_SEQUENCES, df_sequences)): return
             if not render_error_or_progress(100, app_ctrl.db.update_tab_from_df(Tabs.ACRO_MARKS, df_marks)): return
 
-            status_area.text("Done!")
-            st.success("Database successfully updated from CTX file.")
+            status_area.success("Database successfully updated with CTX file.")
+            progress_bar.empty()
 
 def render_judges_page():
     st.markdown("""
@@ -95,8 +93,7 @@ def render_judges_page():
     Cols = Tbl.Cols
 
     # Check for Admins with blank User ID
-    judge_email_map = {dm.UserBase.clean_email(j.email): j.id for j in all_judges if j.email}
-
+    judge_email_map = {j.email: j.id for j in all_judges if j.email}
     for user in all_users:
         if user.role == "admin" and user.id == "" and user.email in judge_email_map:
             match_judge_id = judge_email_map[user.email]
@@ -141,7 +138,7 @@ def render_judges_page():
         df,
         column_config={
             Cols.SELECTED: st.column_config.CheckboxColumn("Invite", help="Select to send email to the judge so she/he can register in AeroScore App"),
-            Cols.ID: st.column_config.NumberColumn("ID", format="%d", disabled=True, help="ID for ACRO Scoring", width=30),
+            Cols.ID: st.column_config.NumberColumn("ID", format="%d", disabled=True, help="ID for ACRO Scoring"),
             Cols.NAME: st.column_config.TextColumn("Judge Name", disabled=True, help="Name for ACRO Scoring", width="medium"),
             Cols.EMAIL: st.column_config.TextColumn("Email (Editable)", help="Add the Judge's email so it can register in the AeroScoring App", width="medium"),
             Cols.REGISTERED: st.column_config.CheckboxColumn("User?", disabled=True, help="A user was created in AeroScoring App using this email (the judge registered)"),
@@ -169,10 +166,9 @@ def render_judges_page():
         
     with col_email:
         num_selected = len(current_selected_ids)
-        if st.button(f"Send Invite ({num_selected})", type="primary", icon="📧", disabled=(num_selected==0), help="Remember to save any chnage before sending the emails."):
+        if st.button(f"Send Invite ({num_selected})", type="primary", icon="📧", disabled=(num_selected==0), help="Remember to save any change before sending the emails."):
             
-            progress_text = "Sending emails..."
-            progress_bar = status_area.progress(0, text=progress_text)
+            progress_bar = status_area.progress(0, text="Sending emails...")
             
             targets = [j for j in all_judges if j.id in current_selected_ids]
             
@@ -181,15 +177,11 @@ def render_judges_page():
                 progress = int(((i + 1) / len(targets)) * 100)
                 progress_bar.progress(progress, text=f"Sending to {judge.name}...")
                 
-                if not judge.email:
-                    status_area.warning(f"Skipped {judge.name} (ID {judge.id}): No email address.", icon="⚠️")
-                    continue
-                
                 ok, msg = app_ctrl.db.send_judge_invite(judge, app_ctrl.auth_user)
                 if ok:
                     success_count += 1
                 else:
-                    status_area.error(f"Failed to send to {judge.name}: {msg}", icon="❌")
+                    status_area.error(f"Failed to send email to {judge.name}: {msg}", icon="❌")
             
             progress_bar.empty()
             if success_count > 0:
@@ -213,15 +205,14 @@ def render_judges_page():
             # deleted_rows is a list of indices (integers) from the ORIGINAL dataframe
             if changes["deleted_rows"]:
                 for index in changes["deleted_rows"]:
-                    judge_to_del = df.iloc[index] # type: ignore
-                    judge_id = int(judge_to_del[Cols.ID]) # type: ignore
+                    judge_to_del = Tbl(**df.iloc[index].to_dict()) # type: ignore
 
-                    if judge_to_del[Cols.IS_ADMIN]:
-                        status_area.error(f"Cannot delete Judge {judge_id} ({judge_to_del[Cols.NAME]}) because she/he is an Admin.", icon="🚫")
+                    if judge_to_del.is_admin:
+                        status_area.error(f"Cannot delete Judge {judge_to_del.name} ({judge_to_del.id}) because she/he is an Admin.", icon="🚫")
                         has_error = True
                         continue
                     
-                    success, msg = app_ctrl.db.delete_judge(judge_id)
+                    success, msg = app_ctrl.db.delete_judge(judge_to_del.id)
                     if success:
                         status_area.info(msg, icon="🗑️")
                     else:
@@ -230,33 +221,25 @@ def render_judges_page():
 
             # edited_rows is a dict: {row_index: {"col_name": "new_value"}}
             if changes["edited_rows"]:
-                emails_used: set[EmailStr] = set()
                 for index, updates in changes["edited_rows"].items():
                     if Cols.EMAIL in updates:
-                        new_email = dm.UserBase.clean_email(updates[Cols.EMAIL])
-                        if new_email in emails_used:
-                            status_area.error(f"Email {new_email} is duplicated.", icon="🚫")
-                            has_error = True
-                            continue
-                        
-                        emails_used.add(new_email)
-                        judge_row = df.iloc[index] # type: ignore
-                        judge_id = int(judge_row[Cols.ID]) # type: ignore
+                        judge_to_update = Tbl(**df.iloc[index].to_dict()) # type: ignore
+                        judge_to_update.email = updates[Cols.EMAIL]
 
-                        if judge_row[Cols.IS_ADMIN]:
-                            status_area.error(f"Cannot alter Judge {judge_id} ({judge_row[Cols.NAME]}) email because she/he is an Admin.", icon="🚫")
+                        if judge_to_update.is_admin:
+                            status_area.error(f"Cannot alter Judge {judge_to_update.name} ({judge_to_update.id}) email because she/he is an Admin.", icon="🚫")
                             has_error = True
                             continue
                         
                         try:
-                            success, msg = app_ctrl.db.update_judge_email(judge_id, new_email)
+                            success, msg = app_ctrl.db.update_judge_email(judge_to_update.id, str(judge_to_update.email))
                             if success:
                                 status_area.info(msg, icon="✅")
                             else:
                                 status_area.error(msg, icon="❌")
                                 has_error = True
                         except Exception as e:
-                            status_area.error(f"Invalid email format for Judge ID {judge_id} ({judge_row[Cols.NAME]}): {e}", icon="❌")
+                            status_area.error(f"Invalid email format for Judge {judge_to_update.name} ({judge_to_update.id}): {e}", icon="❌")
                             has_error = True
 
             if has_error:
