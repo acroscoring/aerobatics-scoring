@@ -60,7 +60,7 @@ def render_import_page():
                 return True
 
             # ------- Sync CTX File & App -------
-            if not render_error_or_progress(10, app_ctrl.db.sync_acro_judges(df_judges)): return
+            if not render_error_or_progress(10, app_ctrl.db.judges.sync_judges(df_judges)): return
 
 
             # ------- Save CTX File -------
@@ -86,8 +86,8 @@ def render_judges_page():
 
     assert app_ctrl.db is not None
     assert app_ctrl.auth_user is not None
-    all_judges = app_ctrl.db.get_all_judges()
-    all_users = app_ctrl.db.get_all_users()
+    all_judges = app_ctrl.db.judges.all_judges
+    all_users = app_ctrl.db.users.all_users
 
     Tbl = dm.JudgeTableRow 
     Cols = Tbl.Cols
@@ -99,8 +99,9 @@ def render_judges_page():
             match_judge_id = judge_email_map[user.email]
             
             try:
-                app_ctrl.db.update_admin_user_id(user.email, match_judge_id)
-                st.toast(f"Linked Admin {user.username} to Judge ID {match_judge_id}", icon="🔗")
+                user.id = match_judge_id
+                app_ctrl.db.users.update(user)
+                st.toast(f"Linked Admin {user.username} to Judge ID {user.id}", icon="🔗")
             except Exception as e:
                 st.error(f"Error linking admin: {e}")
                 return
@@ -177,7 +178,7 @@ def render_judges_page():
                 progress = int(((i + 1) / len(targets)) * 100)
                 progress_bar.progress(progress, text=f"Sending to {judge.name}...")
                 
-                ok, msg = app_ctrl.db.send_judge_invite(judge, app_ctrl.auth_user)
+                ok, msg = app_ctrl.db.judges.send_judge_invite(judge, app_ctrl.auth_user)
                 if ok:
                     success_count += 1
                 else:
@@ -212,7 +213,8 @@ def render_judges_page():
                         has_error = True
                         continue
                     
-                    success, msg = app_ctrl.db.delete_judge(judge_to_del.id)
+                    _ , judge_to_delete = app_ctrl.db.judges.get_by_id(judge_to_del.id)
+                    success, msg = app_ctrl.db.judges.delete(judge_to_delete)
                     if success:
                         status_area.info(msg, icon="🗑️")
                     else:
@@ -232,7 +234,8 @@ def render_judges_page():
                             continue
                         
                         try:
-                            success, msg = app_ctrl.db.update_judge_email(judge_to_update.id, str(judge_to_update.email))
+                            _ , judge = app_ctrl.db.judges.get_by_id(judge_to_update.id)
+                            success, msg = app_ctrl.db.judges.update_email(judge, str(judge_to_update.email))
                             if success:
                                 status_area.info(msg, icon="✅")
                             else:

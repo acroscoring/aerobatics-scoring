@@ -42,7 +42,9 @@ class CompDB:
     @classmethod
     def connect(cls, sheet_id: str) -> "CompDB":
         session_key = f"CompDB_{sheet_id}"
-        return sm.get_session_state_singleton(session_key, lambda: cls(sheet_id))
+        compDB: CompDB = sm.get_session_state_singleton(session_key, lambda: cls(sheet_id))
+        compDB.db.refresh()
+        return compDB
 
     @classmethod
     def connect_or_stop(cls) -> "CompDB":
@@ -58,7 +60,7 @@ class CompDB:
         try:
             user = dm.User.create(user_name, admin_email, password, "admin", "")
             db = gm.SheetDB.create(comp_name=comp_name, admin_email=admin_email)
-            db.register_user(user)
+            db.users.register(user)
             return CompDB.connect(db.id)
         except Exception as e:
             _error_and_stop(e)
@@ -137,7 +139,7 @@ class AuthService:
         
     def login(self, db: gm.SheetDB, email: str, password: str):
         try:
-            user = db.authenticate_user(email=email, password=password)
+            user = db.users.authenticate(email=email, password=password)
             auth_user = dm.AuthUser.from_user(user=user, comp_id=db.id)
             token = sec.create_token(auth_user)
             self._cookies[self._cookie_name] = token
@@ -148,9 +150,9 @@ class AuthService:
 
     def forgot_password(self, db: gm.SheetDB, email: str):
         try:
-            db.get_user_by_email(email)    
-            temp_pass = str(uuid.uuid4())[:6]
-            db.update_user_password(email, temp_pass)
+            _ , user = db.users.get_by_email(email)
+            user.password = str(uuid.uuid4())[:6]
+            db.users.update(user)
             self.logout()
             # Send email with new password
             st.toast("Check your email for the temporary password.")
@@ -256,9 +258,9 @@ class Register:
                 raise Exception(const.ErrorMsgs.NO_COMP_FOUND)
             
             judge_id = Register._get_judge_id_from_query_params()
-            self.judge_details = self.db.get_judge_details(judge_id)
+            _ , self.judge_details = self.db.judges.get_by_id(judge_id)
             try:
-                self.db.get_user_by_role_and_id(role="judge", id=judge_id)
+                self.db.users.get_by_role_and_id(role="judge", id=judge_id)
                 raise judgeIdAlreadyRegistered(f"Judge ID {judge_id} is already registered.")
             except gm.UserRoleAndIdNotFound as e:
                 pass
@@ -273,7 +275,7 @@ class Register:
     def create_judge_user(self, user_name: str, password: str):
         try:
             user = dm.User.create(user_name, self.judge_details.email, password, "judge", self.judge_details.id)
-            self.db.register_user(user)
+            self.db.users.register(user)
         except Exception as e:
             _error_and_stop(e)
 
@@ -318,7 +320,7 @@ class CompScoreSheetAi:
 
     def get_scoring_using_ai(self, image: Image):
         try:
-            new_score_sheet = self.db.get_scoring_sheet_data_using_ai(image)
+            new_score_sheet = gm.get_scoring_sheet_data_using_ai(image)
             if new_score_sheet:
                 sm.set_session_state("current_score_sheet", new_score_sheet)
             else:

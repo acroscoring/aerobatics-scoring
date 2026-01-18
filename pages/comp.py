@@ -201,7 +201,7 @@ if current_score_sheet:
                 timestamp=datetime.now().strftime("%a %d-%b-%Y %H:%M:%S")
             )
 
-            result_ok, msg = ctrl.db.upsert_mark(db_model) 
+            result_ok, msg = ctrl.db.marks.upsert(db_model) 
             
             if result_ok:
                 st.success("Scores submitted successfully!", icon="✅")
