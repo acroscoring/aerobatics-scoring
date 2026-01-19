@@ -175,11 +175,6 @@ class SheetDB:
     def connect(cls, sheet_id: str) -> "SheetDB":
         session_key = f"SheetDB_{sheet_id}"
         return get_session_state_singleton(session_key, lambda: cls(sheet_id))
-        
-    def refresh(self):
-        self.users.refresh()
-        self.judges.refresh()
-        self.marks.refresh()
     
     @classmethod
     def create(cls, comp_name: str, admin_email: str) -> "SheetDB":
@@ -245,6 +240,7 @@ class SheetDB:
                 raise Exception(f"Error fetching users: {e}")
     
         def get_by_email(self, email: str) -> Tuple[int, dm.User]:
+            self.refresh()
             email = dm.User.clean_email(email)
             for i, u in enumerate(self.all_users):
                 if u.email == email:
@@ -252,6 +248,7 @@ class SheetDB:
             raise UserEmailNotFound(f"User {email} not found in sheet (DB)")
     
         def get_by_role_and_id(self, role: dm.RoleType, id: int) -> Tuple[int, dm.User]:
+            self.refresh()
             for i, u in enumerate(self.all_users):
                 if u.role == role and u.id == id:
                     return i, u
@@ -291,7 +288,7 @@ class SheetDB:
                 except UserEmailNotFound:
                     raise Exception(f"User {user.email} not found to update.")
 
-                row_values = list(user.model_dump().values())
+                row_values = user.to_sheet_row(self._users_headers)
                 row_num = index + 2 # +2 for 1-based index + header
                 self._users_ws.update(range_name=f"A{row_num}", values=[row_values])
                 self.refresh()
@@ -335,6 +332,7 @@ class SheetDB:
                 raise Exception(f"Error fetching judges: {e}")
 
         def get_by_id(self, judge_id: int) -> Tuple[int, dm.Judge]:
+            self.refresh()
             for i, j in enumerate(self.all_judges):
                 if j.id == judge_id:
                     return i, j
@@ -354,7 +352,7 @@ class SheetDB:
                     return True, f"No name update required on {old_judge.name}."
 
                 old_judge.name = new_name
-                row_values = list(old_judge.model_dump().values())
+                row_values = list(old_judge.to_sheet_row(self._judges_headers))
                 row_num = index + 2 # +2 for 1-based index + header
                 self._judges_ws.update(range_name=f"A{row_num}", values=[row_values])
                 self.refresh()
@@ -375,7 +373,7 @@ class SheetDB:
                     return True, f"No email update required on {old_judge.name} ({old_judge.id})."
 
                 old_judge.email = judge.email
-                row_values = list(old_judge.model_dump().values())
+                row_values = list(old_judge.to_sheet_row(self._judges_headers))
                 row_num = index + 2 # +2 for 1-based index + header
                 self._judges_ws.update(range_name=f"A{row_num}", values=[row_values])
                 self.refresh()
@@ -469,8 +467,7 @@ class SheetDB:
                     
                 try:
                     _ , existing_user = self.parent.users.get_by_email(new_email)
-                    is_same_person = (existing_user.role == "judge" and existing_user.id == judge.id)
-                    if not is_same_person:
+                    if existing_user.id != judge.id:
                         return False, f"Email '{new_email}' is already registered to another User ({existing_user.username}). Delete the User first."
                 except UserEmailNotFound:
                     pass
@@ -579,6 +576,7 @@ class SheetDB:
                 raise Exception(f"Error fetching marks: {e}")
             
         def get_by_id(self, seq_id: int, pilot_id: int, judge_id: int) -> Tuple[int, dm.AcroMark]:
+            self.refresh()
             for i, m in enumerate(self.all_marks):
                 if m.sequence_id == seq_id and m.pilot_id == pilot_id and m.judge_id == judge_id:
                     return i, m

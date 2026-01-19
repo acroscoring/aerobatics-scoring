@@ -84,29 +84,25 @@ def render_judges_page():
                 """)
     st.divider()
 
+    def reset_all():
+        assert app_ctrl.db is not None
+        sm.set_session_state("judge_selection", set[int])
+        sm.set_session_state("dynamic_table_session_key", sm.get_session_state("dynamic_table_session_key")+1)
+        app_ctrl.db.judges.refresh()
+        app_ctrl.db.users.refresh()
+        st.rerun()
+
     assert app_ctrl.db is not None
     assert app_ctrl.auth_user is not None
     all_judges = app_ctrl.db.judges.all_judges
     all_users = app_ctrl.db.users.all_users
 
+    if not all_judges:
+        st.error(f"No Judges uploaded yet, please cofigure them in AcroScoring first and then import here.", icon="❌")
+        return
+
     Tbl = dm.JudgeTableRow 
     Cols = Tbl.Cols
-
-    # Check for Admins with blank User ID
-    judge_email_map = {j.email: j.id for j in all_judges if j.email}
-    for user in all_users:
-        if user.role == "admin" and user.id == "" and user.email in judge_email_map:
-            match_judge_id = judge_email_map[user.email]
-            
-            try:
-                user.id = match_judge_id
-                app_ctrl.db.users.update(user)
-                st.toast(f"Linked Admin {user.username} to Judge ID {user.id}", icon="🔗")
-            except Exception as e:
-                st.error(f"Error linking admin: {e}")
-                return
-            
-            user.id = match_judge_id
 
     # Build DF table
     user_map = {u.id: u for u in all_users if (u.role == "judge" or u.role == "admin") and u.id != ""}
@@ -128,8 +124,8 @@ def render_judges_page():
     
     df = pd.DataFrame(table_data)
 
-    if st.button("Select All Unregistered", help="Selects all judges who haven't registered yet.", type="secondary"):
-        unreg_ids = {j.id for j in all_judges if j.id not in user_map}
+    if st.button("Select All to Send Email", help="Selects all judges who haven't registered yet and have an email.", type="secondary", icon="✅"):
+        unreg_ids = {j.id for j in all_judges if j.id not in user_map and j.email}
         sm.set_session_state("judge_selection", unreg_ids)
         st.rerun()
 
@@ -161,9 +157,7 @@ def render_judges_page():
 
     with col_cancel:
         if st.button("Reset / Cancel", type="secondary", icon="⏪"):
-            sm.set_session_state("judge_selection", set[int])
-            sm.set_session_state("dynamic_table_session_key", sm.get_session_state("dynamic_table_session_key")+1)
-            st.rerun()
+            reset_all()
         
     with col_email:
         num_selected = len(current_selected_ids)
@@ -187,10 +181,8 @@ def render_judges_page():
             progress_bar.empty()
             if success_count > 0:
                 status_area.success(f"Successfully sent {success_count} invitation emails!", icon="✅")
-                time.sleep(3)
-                sm.set_session_state("judge_selection", set[int])
-                sm.set_session_state("dynamic_table_session_key", sm.get_session_state("dynamic_table_session_key")+1)
-                st.rerun()
+                time.sleep(5)
+                reset_all()
 
     with col_save:
         if st.button("Save Changes", type="primary", icon="💾"):
@@ -223,12 +215,23 @@ def render_judges_page():
 
             # edited_rows is a dict: {row_index: {"col_name": "new_value"}}
             if changes["edited_rows"]:
+                admin_email_map = {u.email: u for u in all_users if u.role == "admin" and u.id == ""} # Check for Admins with blank User ID
                 for index, updates in changes["edited_rows"].items():
                     if Cols.EMAIL in updates:
                         judge_to_update = Tbl(**df.iloc[index].to_dict()) # type: ignore
-                        judge_to_update.email = updates[Cols.EMAIL]
+                        judge_to_update.email = dm.Judge.clean_email(updates[Cols.EMAIL])
 
-                        if judge_to_update.is_admin:
+                        if judge_to_update.email in admin_email_map:
+                            try:
+                                user = admin_email_map[judge_to_update.email]
+                                user.id = judge_to_update.id
+                                app_ctrl.db.users.update(user)
+                                status_area.info(f"Linked Admin {user.username} to Judge ID {user.id}", icon="🔗")
+                            except Exception as e:
+                                status_area.error(f"Error linking admin: {e}", icon="❌")
+                                has_error = True
+                                continue
+                        elif judge_to_update.is_admin:
                             status_area.error(f"Cannot alter Judge {judge_to_update.name} ({judge_to_update.id}) email because she/he is an Admin.", icon="🚫")
                             has_error = True
                             continue
@@ -248,10 +251,9 @@ def render_judges_page():
             if has_error:
                 status_area.error("There were warnings/errors above. Please check them and when ready 'Reset / Cancel' so the table load with the latest data.", icon="👀")
             else:
-                time.sleep(3)
-                sm.set_session_state("judge_selection", set[int])
-                sm.set_session_state("dynamic_table_session_key", sm.get_session_state("dynamic_table_session_key")+1)
-                st.rerun()
+                time.sleep(5)
+                reset_all()
+    
 
 # --------------------------------------------------------------------------------------------------------------
 # Main Page

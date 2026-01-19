@@ -42,9 +42,7 @@ class CompDB:
     @classmethod
     def connect(cls, sheet_id: str) -> "CompDB":
         session_key = f"CompDB_{sheet_id}"
-        compDB: CompDB = sm.get_session_state_singleton(session_key, lambda: cls(sheet_id))
-        compDB.db.refresh()
-        return compDB
+        return sm.get_session_state_singleton(session_key, lambda: cls(sheet_id))
 
     @classmethod
     def connect_or_stop(cls) -> "CompDB":

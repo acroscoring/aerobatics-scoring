@@ -36,11 +36,14 @@ class UserBase(BaseModel):
     @field_validator('email')
     @classmethod
     def clean_email(cls, email: str) -> str:
-        return email.lower().strip()
+        if email:
+            return email.lower().strip()
+        else:
+            return ""
     
-    def to_sheet_row(self, headers: List[str]) -> List[str]:
+    def to_sheet_row(self, headers: List[str]) -> List[Any]:
         data = self.model_dump()
-        return [str(data.get(h)) for h in headers]
+        return [data.get(h) for h in headers]
 
 class User(UserBase):
     password: str = Field(min_length=6, description="Will be hashed automatically")

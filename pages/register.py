@@ -6,7 +6,8 @@ import util.constants as const
 app_ctrl = load(title="📝 Create User to Upload Scores")
 
 if app_ctrl.is_user_logged_in():
-    st.error(f"Logout to register a new user.", icon="❌")
+    assert app_ctrl.auth_user is not None
+    st.info(f"Hi {app_ctrl.auth_user.username}, you are registered. Use the pages in the menu to navegate the App. Logout to register a new user.", icon="👋🏻")
     st.stop()
 
 if app_ctrl.is_comp_setup():
