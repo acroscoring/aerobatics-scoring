@@ -1,10 +1,12 @@
 #import streamlit as st
 from streamlit import cache_resource, secrets, context
+from streamlit.delta_generator import DeltaGenerator
 import requests
 import gspread
 from typing import cast, Literal, Any, List, Tuple, Dict
 from pydantic import BaseModel, EmailStr, HttpUrl
 from google import genai
+from google.genai import errors
 from PIL import Image
 from util.streamlit_model import get_session_state_singleton, set_session_state
 import util.data_model as dm
@@ -12,7 +14,6 @@ import util.security_model as sec
 from gspread_dataframe import set_with_dataframe, get_as_dataframe # type: ignore
 import pandas as pd
 import util.constants as const
-
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -107,23 +108,38 @@ def _get_google_app_script_url() -> str:
 
 # --------------------------------------------------------------------------------------------------------------
 
-def get_scoring_sheet_data_using_ai(image: Image.Image) -> dm.ScoreSheet:
+def get_scoring_sheet_data_using_ai(image: Image.Image, status_area: DeltaGenerator) -> dm.ScoreSheet:
         try:
             api_key: str = secrets["google_gemini"]["api_key"]
             genai_client = _get_genai_client(api_key)
             prompt = "Extract the data from this aerobatics score sheet. Return 0 for missing values."
-            response = genai_client.models.generate_content(
-                model=secrets["google_gemini"]["model"],
-                contents=[
-                    image,  # Image 1st
-                    prompt  # Prompt 2nd as per Google best practice https://ai.google.dev/gemini-api/docs/image-understanding#tips-best-practices
-                ],
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": dm.ScoreSheet,
-                },
-            )
-            return cast(dm.ScoreSheet, response.parsed)
+            models: List[str] = secrets["google_gemini"]["models"]
+            # Invert the list to test old models 1st
+            #models = models[::-1]
+
+            for model_name in models:
+                try:
+                    status_area.info(f"Model {model_name} processing...")
+                    response = genai_client.models.generate_content(
+                        model=model_name,
+                        contents=[
+                            image,  # Image 1st
+                            prompt  # Prompt 2nd as per Google best practice https://ai.google.dev/gemini-api/docs/image-understanding#tips-best-practices
+                        ],
+                        config={
+                            "response_mime_type": "application/json",
+                            "response_schema": dm.ScoreSheet,
+                        },
+                    )
+                    return cast(dm.ScoreSheet, response.parsed)
+                except errors.APIError as e:
+                    if e.code == 429 or e.code >= 500:
+                        status_area.warning(f"Model {model_name} error {e.code}: {e.message}.")
+                        continue
+                    else:
+                        raise e
+
+            raise Exception(f"All AI models failed.")    
         except KeyError as e:
             raise Exception(f"Missing AI Secret Configuration: {e}")
         except Exception as e:

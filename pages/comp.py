@@ -80,14 +80,11 @@ if not current_score_sheet:
     img_file = st.camera_input("Take a picture", key="widget_camera") if input_method == "📱 Use Camera" else st.file_uploader("Choose file", type=["jpg", "jpeg", "png", "heic", "heif", "webp"], key="widget_uploader")
 
     if img_file:
-        image = Image.open(img_file)
-        
-        # Only show the large image if we haven't extracted data yet (saves screen space)
-        if not current_score_sheet:
-            st.image(image, caption="Image uploaded, looks correct?")
-
         with st.spinner("AI is analyzing the image...", show_time=True):
-            ctrl.get_scoring_using_ai(image)
+            status_area = st.container()
+            image = Image.open(img_file)
+            st.image(image, caption="Image uploaded, looks correct?")
+            ctrl.get_scoring_using_ai(image, status_area)
             st.rerun()
 
 if current_score_sheet:

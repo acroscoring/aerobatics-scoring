@@ -9,6 +9,7 @@ from pandas import DataFrame
 import uuid
 from streamlit_cookies_manager import CookieManager # type: ignore
 import util.constants as const
+from streamlit.delta_generator import DeltaGenerator
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -316,9 +317,9 @@ class CompScoreSheetAi:
     def get_score_sheet_singleton(self) -> dm.ScoreSheet:
         return sm.get_session_state_singleton("current_score_sheet", lambda: None)
 
-    def get_scoring_using_ai(self, image: Image):
+    def get_scoring_using_ai(self, image: Image, status_area: DeltaGenerator):
         try:
-            new_score_sheet = gm.get_scoring_sheet_data_using_ai(image)
+            new_score_sheet = gm.get_scoring_sheet_data_using_ai(image, status_area)
             if new_score_sheet:
                 sm.set_session_state("current_score_sheet", new_score_sheet)
             else:
